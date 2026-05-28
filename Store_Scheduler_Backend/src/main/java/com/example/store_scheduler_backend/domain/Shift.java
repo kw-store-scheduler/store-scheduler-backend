@@ -1,15 +1,13 @@
 package com.example.store_scheduler_backend.domain;
 
-// 몇 명 필요한지
-
 import jakarta.persistence.*;
-import lombok.Getter;
+import lombok.Data;
 import lombok.NoArgsConstructor;
-import java.time.DayOfWeek;
 import java.time.LocalTime;
+import java.time.DayOfWeek;
 
 @Entity
-@Getter
+@Data // 이 어노테이션이 있어야 getName(), getRequiredStaff() 메서드가 자동으로 생성됩니다.
 @NoArgsConstructor
 public class Shift {
 
@@ -17,21 +15,15 @@ public class Shift {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // 어느 매장의 근무 타임라인인지 연결 (N:1)
+    private String name;            // 시간대 명칭 (예: 오전, 오후, 저녁)
+    private LocalTime startTime;    // 출근 시간
+    private LocalTime endTime;      // 퇴근 시간
+    private Integer requiredStaff;  // 해당 시간대 필요 목표 인원
+
+    @Enumerated(EnumType.STRING) // 요일이 DB에 문자열(MONDAY 등)로 저장되도록 설정
+    private DayOfWeek dayOfWeek;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "store_id")
     private Store store;
-
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
-    private DayOfWeek dayOfWeek; // 요일 (MONDAY, TUESDAY 등)
-
-    @Column(nullable = false)
-    private LocalTime startTime; // 근무 시작 시간
-
-    @Column(nullable = false)
-    private LocalTime endTime; // 근무 종료 시간
-
-    @Column(nullable = false)
-    private Integer requiredEmployeeCount; // 해당 타임에 필요한 알바생 수
 }

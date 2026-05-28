@@ -23,3 +23,286 @@ Content-Type: application/json
 ### 2. 전체 매장 목록 조회 테스트
 GET http://localhost:8080/api/stores
 Content-Type: application/json
+
+
+
+
+### 알바생 1 (참빛) 등록
+POST http://localhost:8080/api/employees
+Content-Type: application/json
+
+{
+  "name": "참빛",
+  "phoneNumber": "010-1111-1111",
+  "hourlyWage": 9860,
+  "store": {"id": 1}
+}
+
+### 알바생 2 (새빛) 등록
+POST http://localhost:8080/api/employees
+Content-Type: application/json
+
+{
+  "name": "새빛",
+  "phoneNumber": "010-2222-2222",
+  "hourlyWage": 9860,
+  "store": {"id": 1}
+}
+
+### 알바생 3 (비마) 등록
+POST http://localhost:8080/api/employees
+Content-Type: application/json
+
+{
+  "name": "비마",
+  "phoneNumber": "010-3333-3333",
+  "hourlyWage": 9860,
+  "store": {"id": 1}
+}
+
+### 알바생 4 (누리) 등록
+POST http://localhost:8080/api/employees
+Content-Type: application/json
+
+{
+  "name": "누리",
+  "phoneNumber": "010-4444-4444",
+  "hourlyWage": 9860,
+  "store": {"id": 1}
+}
+
+### 알바생 5 (한울) 등록
+POST http://localhost:8080/api/employees
+Content-Type: application/json
+
+{
+  "name": "한울",
+  "phoneNumber": "010-5555-5555",
+  "hourlyWage": 9860,
+  "store": {"id": 1}
+}
+
+### 참빛의 가용 시간 등록 월 / 9~22
+POST http://localhost:8080/api/availabilities
+Content-Type: application/json
+
+{
+  "employee": {"id": 1},
+  "dayOfWeek": "MONDAY",
+  "startTime": "09:00:00",
+  "endTime": "22:00:00"
+}
+
+### 새빛의 가용 시간 등록 월 / 13~22
+POST http://localhost:8080/api/availabilities
+Content-Type: application/json
+
+{
+  "employee": {"id": 2},
+  "dayOfWeek": "MONDAY",
+  "startTime": "13:00:00",
+  "endTime": "22:00:00"
+}
+
+
+### 비마의 가용 시간 등록 월, 수, 금, 일 / 17~22
+POST http://localhost:8080/api/availabilities
+Content-Type: application/json
+
+{
+  "employee": {"id": 3},
+  "dayOfWeek": "MONDAY",
+  "startTime": "17:00:00",
+  "endTime": "22:00:00"
+}
+###
+POST http://localhost:8080/api/availabilities
+Content-Type: application/json
+
+{
+  "employee": {"id": 3},
+  "dayOfWeek": "WEDNESDAY",
+  "startTime": "17:00:00",
+  "endTime": "22:00:00"
+}
+###
+POST http://localhost:8080/api/availabilities
+Content-Type: application/json
+
+{
+  "employee": {"id": 3},
+  "dayOfWeek": "FRIDAY",
+  "startTime": "17:00:00",
+  "endTime": "22:00:00"
+}
+###
+POST http://localhost:8080/api/availabilities
+Content-Type: application/json
+
+{
+  "employee": {"id": 3},
+  "dayOfWeek": "SUNDAY",
+  "startTime": "17:00:00",
+  "endTime": "22:00:00"
+}
+
+### 누리의 가용 시간 매일 / 09~13
+POST http://localhost:8080/api/availabilities
+Content-Type: application/json
+
+{
+  "employee": {"id": 4},
+  "dayOfWeek": "MONDAY",
+  "startTime": "09:00:00",
+  "endTime": "13:00:00"
+}
+###
+POST http://localhost:8080/api/availabilities
+Content-Type: application/json
+
+{
+  "employee": {"id": 4},
+  "dayOfWeek": "TUESDAY",
+  "startTime": "09:00:00",
+  "endTime": "13:00:00"
+}
+###
+POST http://localhost:8080/api/availabilities
+Content-Type: application/json
+
+{
+  "employee": {"id": 4},
+  "dayOfWeek": "WEDNESDAY",
+  "startTime": "09:00:00",
+  "endTime": "13:00:00"
+}
+###
+POST http://localhost:8080/api/availabilities
+Content-Type: application/json
+
+{
+  "employee": {"id": 4},
+  "dayOfWeek": "THURSDAY",
+  "startTime": "09:00:00",
+  "endTime": "13:00:00"
+}
+###
+POST http://localhost:8080/api/availabilities
+Content-Type: application/json
+
+{
+  "employee": {"id": 4},
+  "dayOfWeek": "FRIDAY",
+  "startTime": "09:00:00",
+  "endTime": "13:00:00"
+}
+###
+POST http://localhost:8080/api/availabilities
+Content-Type: application/json
+
+{
+  "employee": {"id": 4},
+  "dayOfWeek": "SATURDAY",
+  "startTime": "09:00:00",
+  "endTime": "13:00:00"
+}
+###
+POST http://localhost:8080/api/availabilities
+Content-Type: application/json
+
+{
+  "employee": {"id": 4},
+  "dayOfWeek": "SUNDAY",
+  "startTime": "09:00:00",
+  "endTime": "13:00:00"
+}
+
+### 한울의 가용 시간 등록 수~일 / 13~22
+POST http://localhost:8080/api/availabilities
+Content-Type: application/json
+
+{
+  "employee": {"id": 5},
+  "dayOfWeek": "WEDNESDAY",
+  "startTime": "13:00:00",
+  "endTime": "22:00:00"
+}
+###
+POST http://localhost:8080/api/availabilities
+Content-Type: application/json
+
+{
+  "employee": {"id": 5},
+  "dayOfWeek": "THURSDAY",
+  "startTime": "13:00:00",
+  "endTime": "22:00:00"
+}
+###
+POST http://localhost:8080/api/availabilities
+Content-Type: application/json
+
+{
+  "employee": {"id": 5},
+  "dayOfWeek": "FRIDAY",
+  "startTime": "13:00:00",
+  "endTime": "22:00:00"
+}
+###
+POST http://localhost:8080/api/availabilities
+Content-Type: application/json
+
+{
+  "employee": {"id": 5},
+  "dayOfWeek": "SATURDAY",
+  "startTime": "13:00:00",
+  "endTime": "22:00:00"
+}
+###
+POST http://localhost:8080/api/availabilities
+Content-Type: application/json
+
+{
+  "employee": {"id": 5},
+  "dayOfWeek": "SUNDAY",
+  "startTime": "13:00:00",
+  "endTime": "22:00:00"
+}
+
+### 근무 시간대 세팅: 오전
+POST http://localhost:8080/api/shifts
+Content-Type: application/json
+
+{
+  "name": "오전",
+  "startTime": "09:00:00",
+  "endTime": "13:00:00",
+  "requiredStaff": 2,
+  "store": {"id": 1}
+}
+
+### 근무 시간대 세팅: 오후
+POST http://localhost:8080/api/shifts
+Content-Type: application/json
+
+{
+  "name": "오후",
+  "startTime": "13:00:00",
+  "endTime": "17:00:00",
+  "requiredStaff": 3,
+  "store": {"id": 1}
+}
+
+### 근무 시간대 세팅: 저녁
+POST http://localhost:8080/api/shifts
+Content-Type: application/json
+
+{
+  "name": "저녁",
+  "startTime": "17:00:00",
+  "endTime": "22:00:00",
+  "requiredStaff": 2,
+  "store": {"id": 1}
+}
+
+### DB 연동: 스케줄 자동 생성 알고리즘 가동
+POST http://localhost:8080/api/schedules/automate

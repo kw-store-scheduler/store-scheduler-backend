@@ -29,4 +29,7 @@ public class Availability {
 
     @Column(nullable = false)
     private LocalTime endTime;
+
+    public void setEmployee(Employee employee) {
+        this.employee = employee;}
 }
