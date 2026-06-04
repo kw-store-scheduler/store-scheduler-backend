@@ -3,6 +3,8 @@ package com.example.store_scheduler_backend.controller;
 import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.Availability;
 import com.example.store_scheduler_backend.domain.Shift;
+import com.example.store_scheduler_backend.dto.ScheduleResponseDto;
+import com.example.store_scheduler_backend.repository.ScheduleRepository;
 import com.example.store_scheduler_backend.service.EmployeeService;
 import com.example.store_scheduler_backend.service.AvailabilityService;
 import com.example.store_scheduler_backend.service.ShiftService;
@@ -10,6 +12,7 @@ import com.example.store_scheduler_backend.service.ScheduleAutomationService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+import java.util.List;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -23,6 +26,8 @@ public class ScheduleController {
     private final AvailabilityService availabilityService;
     private final ShiftService shiftService;
     private final ScheduleAutomationService automationService;
+
+    private final ScheduleRepository scheduleRepository;
 
     /**
      * 100% 리얼 DB 연동 자동 스케줄링 엔진 가동 API
@@ -98,5 +103,18 @@ public class ScheduleController {
         Map<String, Object> optimizationResult = automationService.runOptimization(finalConfig);
 
         return ResponseEntity.ok(optimizationResult);
+    }
+
+    @GetMapping
+    public ResponseEntity<List<ScheduleResponseDto>> getSchedulesByStore(@RequestParam Long storeId) {
+
+        // 1. DB에서 해당 매장의 스케줄을 싹 다 가져와서
+        // 2. 아까 만든 포장 상자(DTO)로 깔끔하게 변환(map)한 뒤 리스트로 반환
+        List<ScheduleResponseDto> schedules = scheduleRepository.findByStoreIdOrderByWorkDateAscStartTimeAsc(storeId)
+                .stream()
+                .map(ScheduleResponseDto::new)
+                .collect(Collectors.toList());
+
+        return ResponseEntity.ok(schedules);
     }
 }
