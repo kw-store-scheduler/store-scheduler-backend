@@ -288,7 +288,7 @@ Content-Type: application/json
   "name": "오후",
   "startTime": "13:00:00",
   "endTime": "17:00:00",
-  "requiredStaff": 3,
+  "requiredStaff": 2,
   "store": {"id": 1}
 }
 
@@ -306,3 +306,6 @@ Content-Type: application/json
 
 ### DB 연동: 스케줄 자동 생성 알고리즘 가동
 POST http://localhost:8080/api/schedules/automate
+
+### 달력 렌더링용 스케줄 전체 조회
+GET http://localhost:8080/api/schedules?storeId=1

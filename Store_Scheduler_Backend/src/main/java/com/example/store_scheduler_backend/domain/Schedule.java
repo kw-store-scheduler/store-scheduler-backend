@@ -5,11 +5,14 @@ package com.example.store_scheduler_backend.domain;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import lombok.Setter;
+
 import java.time.LocalDate;
 import java.time.LocalTime;
 
 @Entity
 @Getter
+@Setter
 @NoArgsConstructor
 public class Schedule {
 
