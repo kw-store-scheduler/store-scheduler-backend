@@ -33,8 +33,9 @@ public class ScheduleAutomationService {
     @Transactional
     public Map<String, Object> runOptimization(Map<String, Object> configData) {
         try {
-            String scriptPath = "C:\\Users\\aura230\\Desktop\\Store_Scheduler_Backend_New\\Store_Scheduler_Backend\\src\\main\\resources\\python\\scheduler_core_0527.py";
-            String pythonPath = "C:\\Program Files\\PyManager\\python.exe";
+
+            String scriptPath = "src/main/resources/python/scheduler_core_0527.py";
+            String pythonPath = "python";
 
             ProcessBuilder processBuilder = new ProcessBuilder(pythonPath, scriptPath);
             processBuilder.redirectErrorStream(true);

@@ -51,6 +51,7 @@ public class ScheduleController {
             Map<String, Object> empMap = new HashMap<>();
             empMap.put("id", "emp_" + emp.getId());
             empMap.put("name", emp.getName());
+            empMap.put("hourly_wage", emp.getHourlyWage());
 
             // DB에 등록된 알바생별 진짜 가용 요일 추출 (자바 1=월~7=일 -> 파이썬 0=월~6=일 변환)
             List<Integer> availableDays = allAvailabilities.stream()
@@ -60,7 +61,11 @@ public class ScheduleController {
                     .collect(Collectors.toList());
 
             empMap.put("available_days", availableDays);
-            empMap.put("preferred_shifts", List.of(0, 1)); // 선호 시간대 매핑
+            // 1. DB에서 불러온 매장 교대근무(shifts)의 총 개수만큼 0부터 숫자를 생성.
+            List<Integer> dynamicPreferredShifts = java.util.stream.IntStream.range(0, shifts.size())
+                    .boxed()
+                    .collect(java.util.stream.Collectors.toList());
+            empMap.put("preferred_shifts", dynamicPreferredShifts);
             empConfigList.add(empMap);
         }
 
@@ -95,7 +100,8 @@ public class ScheduleController {
         finalConfig.put("shifts", shiftConfigList);
         finalConfig.put("target_staff", targetStaffList); // 리얼 DB 값 바인딩
         finalConfig.put("min_staff", minStaffList);       // 리얼 DB 값 바인딩
-        finalConfig.put("base_hourly", 9860);
+        int baseHourly = employees.get(0).getHourlyWage();
+        finalConfig.put("base_hourly", baseHourly);
         finalConfig.put("night_bonus", 0.5);
         finalConfig.put("time_limit", 10);
 
