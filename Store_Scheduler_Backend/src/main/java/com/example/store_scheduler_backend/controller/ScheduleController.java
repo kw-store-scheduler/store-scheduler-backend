@@ -13,6 +13,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -20,6 +22,7 @@ import java.util.stream.Collectors;
 @RestController
 @RequestMapping("/api/schedules")
 @RequiredArgsConstructor
+@Tag(name = "스케줄 자동화 API", description = "파이썬 알고리즘 연동 및 스케줄 관리")
 public class ScheduleController {
 
     private final EmployeeService employeeService;
@@ -30,8 +33,9 @@ public class ScheduleController {
     private final ScheduleRepository scheduleRepository;
 
     /**
-     * 100% 리얼 DB 연동 자동 스케줄링 엔진 가동 API
+     * DB 연동 자동 스케줄링 엔진 가동 API
      */
+    @Operation(summary = "스케줄 자동 생성", description = "DB의 직원 정보를 바탕으로 파이썬 엔진을 구동하여 최적의 스케줄을 생성합니다.")
     @PostMapping("/automate")
     public ResponseEntity<Map<String, Object>> automateSchedule() {
 
