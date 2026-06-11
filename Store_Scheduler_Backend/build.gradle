@@ -33,6 +33,9 @@ dependencies {
     testAnnotationProcessor 'org.projectlombok:lombok'
     // Swagger API 문서 자동화
     implementation 'org.springdoc:springdoc-openapi-starter-webmvc-ui:2.2.0'
+    // Spring Security 및 JWT 인증 라이브러리
+    implementation 'org.springframework.boot:spring-boot-starter-security'
+    implementation 'io.jsonwebtoken:jjwt-api:0.11.5'
 }
 
 tasks.named('test') {
