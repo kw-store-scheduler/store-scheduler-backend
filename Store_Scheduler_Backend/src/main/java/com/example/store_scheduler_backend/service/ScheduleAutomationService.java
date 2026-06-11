@@ -18,7 +18,6 @@ import java.time.temporal.TemporalAdjusters;
 import java.util.List;
 import java.util.Map;
 
-// 주의: 아래 import 경로는 행님의 실제 패키지에 맞게 수정해야 합니다!
 import com.example.store_scheduler_backend.repository.ScheduleRepository;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
 
@@ -33,7 +32,7 @@ public class ScheduleAutomationService {
     @Transactional
     public Map<String, Object> runOptimization(Map<String, Object> configData) {
         try {
-
+            // OS 환경 독립적인 파이썬 스크립트 상대 경로 설정
             String scriptPath = "src/main/resources/python/scheduler_core_0527.py";
             String pythonPath = "python";
 
@@ -41,12 +40,14 @@ public class ScheduleAutomationService {
             processBuilder.redirectErrorStream(true);
             Process process = processBuilder.start();
 
+            // JSON 직렬화, Python 프로세스 입력 스트림 전달
             String jsonInput = objectMapper.writeValueAsString(configData);
             try (BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(process.getOutputStream(), "UTF-8"))) {
                 writer.write(jsonInput);
                 writer.flush();
             }
 
+            // Python 프로세스 실행 결과 수신
             StringBuilder output = new StringBuilder();
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), "UTF-8"))) {
                 String line;
@@ -61,18 +62,17 @@ public class ScheduleAutomationService {
                 throw new RuntimeException("파이썬 엔진 내부 오류 (Exit Code: " + exitCode + ")\n출력 내용: " + output.toString());
             }
 
-            // 1. JSON 결과를 Map으로 변환
+            // 결과 파싱 및 상태 코드 검증
             Map<String, Object> result = objectMapper.readValue(output.toString(), Map.class);
             String status = (String) result.get("status");
 
-            // 2. 비즈니스 예외 처리 (실행 불가능 상태)
             if ("INFEASIBLE".equals(status)) {
                 result.put("message", "현재 등록된 직원의 가용 시간으로는 스케줄을 생성할 수 없습니다. 조건을 완화해주세요.");
                 result.put("success", false);
                 return result;
             }
 
-            // 3. OPTIMAL 이거나 FEASIBLE (성공)일 경우 DB 저장 (Phase 3 핵심)
+            // 최적화 성공 시 스케줄 DB 영속화
             if (result.containsKey("schedules")) {
                 List<Map<String, Object>> scheduleList = (List<Map<String, Object>>) result.get("schedules");
                 saveSchedulesToDB(scheduleList);
@@ -88,23 +88,20 @@ public class ScheduleAutomationService {
         }
     }
 
-    // 파이썬 결과를 자바 엔티티로 변환하여 DB에 INSERT 하는 로직
     private void saveSchedulesToDB(List<Map<String, Object>> scheduleList) {
         for (Map<String, Object> schedMap : scheduleList) {
             String employeeName = (String) schedMap.get("employeeName");
-            String dayOfWeekStr = (String) schedMap.get("dayOfWeek"); // ex: "MONDAY"
-            String startTimeStr = (String) schedMap.get("startTime"); // ex: "09:00:00"
-            String endTimeStr = (String) schedMap.get("endTime");     // ex: "13:00:00"
+            String dayOfWeekStr = (String) schedMap.get("dayOfWeek"); // ex) "MONDAY"
+            String startTimeStr = (String) schedMap.get("startTime"); // ex) "09:00:00"
+            String endTimeStr = (String) schedMap.get("endTime");     // ex) "13:00:00"
 
-            // 이름으로 직원 엔티티 조회
             Employee employee = employeeRepository.findByName(employeeName)
                     .orElseThrow(() -> new RuntimeException("해당 직원을 DB에서 찾을 수 없습니다: " + employeeName));
 
             Schedule schedule = new Schedule();
             schedule.setEmployee(employee);
-            schedule.setStore(employee.getStore()); // 직원이 속한 매장 정보 연동
+            schedule.setStore(employee.getStore());
 
-            // 실무형 날짜 변환 로직: "MONDAY"를 이번 주(혹은 다가오는) 월요일의 실제 날짜(YYYY-MM-DD)로 변환
             DayOfWeek targetDay = DayOfWeek.valueOf(dayOfWeekStr.toUpperCase());
             LocalDate workDate = LocalDate.now().with(TemporalAdjusters.nextOrSame(targetDay));
 
