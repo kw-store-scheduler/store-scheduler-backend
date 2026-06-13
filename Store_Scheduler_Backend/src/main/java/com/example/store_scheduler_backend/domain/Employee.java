@@ -16,15 +16,14 @@ public class Employee {
     private Long id;
 
     @Column(nullable = false)
-    private String name; // 직원 이름
+    private String name;
 
-    private String phoneNumber; // 전화번호
+    private String phoneNumber;
 
     @Column(nullable = false)
     private Integer hourlyWage; // 시급 (노동법 기반 급여 정산용)
 
-    // 지연 로딩(LAZY) 설정, 외래 키(store_id) 매핑 for 성능 최적화
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "store_id")
-    private Store store; // 직원의 소속 매장
+    private Store store;
 }

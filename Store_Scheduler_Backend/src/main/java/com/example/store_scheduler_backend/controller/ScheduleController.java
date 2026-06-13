@@ -35,21 +35,19 @@ public class ScheduleController {
     /**
      * DB 연동 자동 스케줄링 엔진 가동 API
      */
-    @Operation(summary = "스케줄 자동 생성", description = "DB의 직원 정보를 바탕으로 파이썬 엔진을 구동하여 최적의 스케줄을 생성합니다.")
+    @Operation(summary = "스케줄 자동 생성", description = "DB의 직원 정보를 바탕으로 최적의 스케줄을 생성합니다.")
     @PostMapping("/automate")
     public ResponseEntity<Map<String, Object>> automateSchedule() {
 
-        // 1. DB에서 리얼 데이터들 전부 로드
         List<Employee> employees = employeeService.findEmployees();
         List<Availability> allAvailabilities = availabilityService.findAvailabilities();
         List<Shift> shifts = shiftService.findShifts();
 
-        // 방어 로직: 필수 데이터가 비어있으면 백포스 동작 중단
+        // 방어 로직
         if (shifts.isEmpty() || employees.isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "DB에 등록된 직원이나 근무 시간대(Shift) 데이터가 없습니다."));
         }
 
-        // 2. 파이썬용 employees 구조 빌드
         List<Map<String, Object>> empConfigList = new ArrayList<>();
         for (Employee emp : employees) {
             Map<String, Object> empMap = new HashMap<>();
@@ -57,7 +55,6 @@ public class ScheduleController {
             empMap.put("name", emp.getName());
             empMap.put("hourly_wage", emp.getHourlyWage());
 
-            // DB에 등록된 알바생별 진짜 가용 요일 추출 (자바 1=월~7=일 -> 파이썬 0=월~6=일 변환)
             List<Integer> availableDays = allAvailabilities.stream()
                     .filter(a -> a.getEmployee() != null && a.getEmployee().getId().equals(emp.getId()))
                     .map(a -> a.getDayOfWeek().getValue() - 1)
@@ -65,7 +62,7 @@ public class ScheduleController {
                     .collect(Collectors.toList());
 
             empMap.put("available_days", availableDays);
-            // 1. DB에서 불러온 매장 교대근무(shifts)의 총 개수만큼 0부터 숫자를 생성.
+            // 0부터 숫자 생성
             List<Integer> dynamicPreferredShifts = java.util.stream.IntStream.range(0, shifts.size())
                     .boxed()
                     .collect(java.util.stream.Collectors.toList());
@@ -73,17 +70,14 @@ public class ScheduleController {
             empConfigList.add(empMap);
         }
 
-        // 3. DB에 저장된 진짜 Shift(시간대) 정보 추출하여 가공
         List<Map<String, Object>> shiftConfigList = new ArrayList<>();
         List<Integer> targetStaffList = new ArrayList<>();
         List<Integer> minStaffList = new ArrayList<>();
 
         for (Shift shift : shifts) {
-            // 시간대별 총 근무 시간 계산 (종료 시간 - 시작 시간)
             long hours = java.time.Duration.between(shift.getStartTime(), shift.getEndTime()).toHours();
-            if (hours <= 0) hours = 4; // 시간 계산 오류 방지용 기본값
+            if (hours <= 0) hours = 4; // 기본값 (시간 계산 오류 방지용)
 
-            // 야간 근무 여부 판별 로직 (22시 이후 근무 종료거나 06시 이전 시작 시 야간으로 세팅)
             boolean isNight = shift.getEndTime().isAfter(java.time.LocalTime.of(22, 0)) ||
                     shift.getStartTime().isBefore(java.time.LocalTime.of(6, 0));
 
@@ -93,23 +87,20 @@ public class ScheduleController {
                     "is_night", isNight
             ));
 
-            // DB에 저장된 실제 필요 인원 설정값을 파이썬 배열에 동적으로 주입
             targetStaffList.add(shift.getRequiredStaff());
-            minStaffList.add(1); // 최소 인원은 최적화 모델 구동을 위해 1명 기본 배정
+            minStaffList.add(1); // 최소 인원 1명 기본 배정
         }
 
-        // 4. 파이썬 파라미터 조립
         Map<String, Object> finalConfig = new HashMap<>();
         finalConfig.put("employees", empConfigList);
         finalConfig.put("shifts", shiftConfigList);
-        finalConfig.put("target_staff", targetStaffList); // 리얼 DB 값 바인딩
-        finalConfig.put("min_staff", minStaffList);       // 리얼 DB 값 바인딩
+        finalConfig.put("target_staff", targetStaffList);
+        finalConfig.put("min_staff", minStaffList);
         int baseHourly = employees.get(0).getHourlyWage();
         finalConfig.put("base_hourly", baseHourly);
         finalConfig.put("night_bonus", 0.5);
         finalConfig.put("time_limit", 10);
 
-        // 5. 파이썬 연동 가동 및 결과 반환
         Map<String, Object> optimizationResult = automationService.runOptimization(finalConfig);
 
         return ResponseEntity.ok(optimizationResult);
@@ -118,8 +109,6 @@ public class ScheduleController {
     @GetMapping
     public ResponseEntity<List<ScheduleResponseDto>> getSchedulesByStore(@RequestParam Long storeId) {
 
-        // 1. DB에서 해당 매장의 스케줄을 싹 다 가져와서
-        // 2. 아까 만든 포장 상자(DTO)로 깔끔하게 변환(map)한 뒤 리스트로 반환
         List<ScheduleResponseDto> schedules = scheduleRepository.findByStoreIdOrderByWorkDateAscStartTimeAsc(storeId)
                 .stream()
                 .map(ScheduleResponseDto::new)

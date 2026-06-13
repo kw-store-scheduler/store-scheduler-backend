@@ -7,7 +7,7 @@ import java.time.LocalTime;
 import java.time.DayOfWeek;
 
 @Entity
-@Data // 이 어노테이션이 있어야 getName(), getRequiredStaff() 메서드가 자동으로 생성됩니다.
+@Data // getName(), getRequiredStaff() 메서드 자동 생성용
 @NoArgsConstructor
 public class Shift {
 
@@ -15,12 +15,12 @@ public class Shift {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    private String name;            // 시간대 명칭 (예: 오전, 오후, 저녁)
-    private LocalTime startTime;    // 출근 시간
-    private LocalTime endTime;      // 퇴근 시간
-    private Integer requiredStaff;  // 해당 시간대 필요 목표 인원
+    private String name;
+    private LocalTime startTime;
+    private LocalTime endTime;
+    private Integer requiredStaff;
 
-    @Enumerated(EnumType.STRING) // 요일이 DB에 문자열(MONDAY 등)로 저장되도록 설정
+    @Enumerated(EnumType.STRING)
     private DayOfWeek dayOfWeek;
 
     @ManyToOne(fetch = FetchType.LAZY)

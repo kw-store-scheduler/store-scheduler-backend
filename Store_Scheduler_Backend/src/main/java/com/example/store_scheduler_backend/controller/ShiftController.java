@@ -9,8 +9,8 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import java.util.List;
 import java.util.stream.Collectors;
-import com.example.store_scheduler_backend.domain.Store; // Store 클래스 위치
-import com.example.store_scheduler_backend.repository.StoreRepository; // StoreRepository 위치
+import com.example.store_scheduler_backend.domain.Store;
+import com.example.store_scheduler_backend.repository.StoreRepository;
 
 @RestController
 @RequestMapping("/api/shifts")
@@ -25,7 +25,7 @@ public class ShiftController {
         if (shift.getStore() != null && shift.getStore().getId() != null) {
             Store store = storeRepository.findById(shift.getStore().getId())
                     .orElseThrow(() -> new RuntimeException("해당 매장을 찾을 수 없습니다."));
-            shift.setStore(store); // 진짜 객체로 교체
+            shift.setStore(store);
         }
         Long shiftId = shiftService.registerShift(shift);
         return ResponseEntity.ok(shiftId);
