@@ -33,7 +33,7 @@ public class EmployeeController {
     public ResponseEntity<List<EmployeeResponseDto>> getAllEmployees() {
         List<Employee> findEmployees = employeeService.findEmployees();
 
-        // 직원을 조회할 때 소속 매장 이름까지만 딱 정제해서 반환 (무한 루프 원천 차단)
+        // 직원을 조회 시 소속 매장 이름까지만 반환 (무한 루프 차단)
         List<EmployeeResponseDto> result = findEmployees.stream()
                 .map(e -> new EmployeeResponseDto(
                         e.getId(),
@@ -57,6 +57,6 @@ public class EmployeeController {
         private String name;
         private String phoneNumber;
         private Integer hourlyWage;
-        private String storeName; // 매장 객체 통째로가 아닌, 이름만 쏙 빼서 순환 참조 고리를 끊습니다.
+        private String storeName;
     }
 }
