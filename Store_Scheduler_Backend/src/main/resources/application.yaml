@@ -20,3 +20,10 @@ spring:
 logging:
   level:
     org.hibernate.SQL: debug
+
+
+jwt:
+  # 문/숫자/특수문자 조합 32자 이상
+  secret: StoreSchedulerBackendSecretKeyForJwtAuthentication2026!
+  # 토큰 만료 시간 (1시간)
+  expiration_time: 3600000
