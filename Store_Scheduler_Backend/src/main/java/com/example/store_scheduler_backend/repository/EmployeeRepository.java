@@ -8,6 +8,5 @@ import java.util.Optional;
 
 @Repository
 public interface EmployeeRepository extends JpaRepository<Employee, Long> {
-    // 이 한 줄이 있어야 파이썬이 준 이름("참빛")으로 DB에서 직원을 꺼내올 수 있습니다.
     Optional<Employee> findByName(String name);
 }

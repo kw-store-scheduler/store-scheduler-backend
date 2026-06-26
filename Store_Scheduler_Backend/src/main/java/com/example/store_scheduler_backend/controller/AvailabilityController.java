@@ -21,14 +21,14 @@ import java.util.stream.Collectors;
 public class AvailabilityController {
 
     private final AvailabilityService availabilityService;
-    private final EmployeeRepository employeeRepository; // 직원 객체를 찾기 위해 주입
+    private final EmployeeRepository employeeRepository;
 
     /**
      * 가용 시간 등록 API (500 에러 방지용 직원 객체 매핑 추가)
      */
     @PostMapping
     public ResponseEntity<Long> createAvailability(@RequestBody Availability availability) {
-        // JSON에서 들어온 employee의 ID로 DB에서 실제 직원을 찾아 연결
+
         if (availability.getEmployee() != null && availability.getEmployee().getId() != null) {
             Employee employee = employeeRepository.findById(availability.getEmployee().getId())
                     .orElseThrow(() -> new RuntimeException("해당 직원을 찾을 수 없습니다."));
