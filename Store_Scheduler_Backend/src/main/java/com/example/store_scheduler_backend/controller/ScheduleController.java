@@ -39,11 +39,11 @@ public class ScheduleController {
     @PostMapping("/automate")
     public ResponseEntity<Map<String, Object>> automateSchedule() {
 
+        // DB 데이터들 전부 로드
         List<Employee> employees = employeeService.findEmployees();
         List<Availability> allAvailabilities = availabilityService.findAvailabilities();
         List<Shift> shifts = shiftService.findShifts();
 
-        // 방어 로직
         if (shifts.isEmpty() || employees.isEmpty()) {
             return ResponseEntity.badRequest().body(Map.of("error", "DB에 등록된 직원이나 근무 시간대(Shift) 데이터가 없습니다."));
         }
@@ -55,6 +55,7 @@ public class ScheduleController {
             empMap.put("name", emp.getName());
             empMap.put("hourly_wage", emp.getHourlyWage());
 
+            // 알바생별 가용 요일 추출
             List<Integer> availableDays = allAvailabilities.stream()
                     .filter(a -> a.getEmployee() != null && a.getEmployee().getId().equals(emp.getId()))
                     .map(a -> a.getDayOfWeek().getValue() - 1)
@@ -62,7 +63,7 @@ public class ScheduleController {
                     .collect(Collectors.toList());
 
             empMap.put("available_days", availableDays);
-            // 0부터 숫자 생성
+
             List<Integer> dynamicPreferredShifts = java.util.stream.IntStream.range(0, shifts.size())
                     .boxed()
                     .collect(java.util.stream.Collectors.toList());
@@ -70,13 +71,15 @@ public class ScheduleController {
             empConfigList.add(empMap);
         }
 
+        // DB Shift 정보 추출, 가공
         List<Map<String, Object>> shiftConfigList = new ArrayList<>();
         List<Integer> targetStaffList = new ArrayList<>();
         List<Integer> minStaffList = new ArrayList<>();
 
         for (Shift shift : shifts) {
+            // 시간대별 총 근무 시간 계산 (종료 시간 - 시작 시간)
             long hours = java.time.Duration.between(shift.getStartTime(), shift.getEndTime()).toHours();
-            if (hours <= 0) hours = 4; // 기본값 (시간 계산 오류 방지용)
+            if (hours <= 0) hours = 4; // 기본값 (시간 계산 오류 방지)
 
             boolean isNight = shift.getEndTime().isAfter(java.time.LocalTime.of(22, 0)) ||
                     shift.getStartTime().isBefore(java.time.LocalTime.of(6, 0));
@@ -88,7 +91,7 @@ public class ScheduleController {
             ));
 
             targetStaffList.add(shift.getRequiredStaff());
-            minStaffList.add(1); // 최소 인원 1명 기본 배정
+            minStaffList.add(1);
         }
 
         Map<String, Object> finalConfig = new HashMap<>();
