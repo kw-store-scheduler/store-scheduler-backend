@@ -19,10 +19,10 @@ public class Availability {
     @JoinColumn(name = "employee_id")
     private Employee employee;
 
-    // DB에 'MONDAY', 'TUESDAY' 같은 문자열로 저장
+    // DB에 요일 문자열로 저장
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
-    private DayOfWeek dayOfWeek; // 자바 표준 요일 Enum (MONDAY, TUESDAY 등)
+    private DayOfWeek dayOfWeek;
 
     @Column(nullable = false)
     private LocalTime startTime;

@@ -16,10 +16,10 @@ public class Store {
     private Long id;
 
     @Column(nullable = false)
-    private String name; // 매장 이름
-    private String address; // 매장 주소
+    private String name;
+    private String address;
 
-    // 매장 하나에 여러 직원이 속함 -> 1:N 관계
+    // 매장:직원 = 1:N
     @OneToMany(mappedBy = "store", cascade = CascadeType.ALL)
     private List<Employee> employees = new ArrayList<>();
 }

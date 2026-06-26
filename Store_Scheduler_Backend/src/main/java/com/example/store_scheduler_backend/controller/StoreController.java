@@ -27,13 +27,13 @@ public class StoreController {
     }
 
     /**
-     * 전체 매장 조회 API (무한 루프 방지 고도화 버전)
+     * 전체 매장 조회 API (무한 루프 방지 고도화)
      */
     @GetMapping
     public ResponseEntity<List<StoreResponseDto>> getAllStores() {
         List<Store> findStores = storeService.findStores();
 
-        // 엔티티를 안전한 DTO 객체로 변환하여 무한 참조를 원천 차단합니다.
+        // 엔티티 -> DTO 객체로 변환 (무한 참조 가능성 차단)
         List<StoreResponseDto> result = findStores.stream()
                 .map(s -> new StoreResponseDto(s.getId(), s.getName(), s.getAddress()))
                 .collect(Collectors.toList());
@@ -42,7 +42,7 @@ public class StoreController {
     }
 
     /**
-     * 외부 노출용 안전한 매장 데이터 가방 (DTO)
+     * 외부 노출용 (DTO)
      */
     @Data
     @AllArgsConstructor
