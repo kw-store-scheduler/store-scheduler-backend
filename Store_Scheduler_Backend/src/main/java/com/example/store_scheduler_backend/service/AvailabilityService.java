@@ -19,7 +19,7 @@ public class AvailabilityService {
      */
     @Transactional
     public Long registerAvailability(Availability availability) {
-        // 실무형 예외 처리: 시작 시간이 종료 시간보다 늦을 수 없습니다.
+        // 시작 시간이 종료 시간보다 늦으면 안 됨
         if (availability.getStartTime() != null && availability.getEndTime() != null) {
             if (availability.getStartTime().isAfter(availability.getEndTime())) {
                 throw new IllegalArgumentException("시작 시간은 종료 시간보다 빨라야 합니다.");
