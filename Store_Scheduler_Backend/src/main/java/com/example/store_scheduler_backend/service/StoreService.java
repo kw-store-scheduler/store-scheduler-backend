@@ -19,7 +19,7 @@ public class StoreService {
      */
     @Transactional
     public Long registerStore(Store store) {
-        // 실무형 예외 처리: 매장 이름이 비어있으면 등록을 막습니다.
+        // 매장 이름 없으면 등록 거부
         if (store.getName() == null || store.getName().trim().isEmpty()) {
             throw new IllegalArgumentException("매장 이름은 필수 입력 항목입니다.");
         }

@@ -19,7 +19,7 @@ public class EmployeeService {
      */
     @Transactional
     public Long registerEmployee(Employee employee) {
-        // 비즈니스 검증: 시급이 지나치게 낮게 설정되는 오염 데이터를 차단합니다.
+        // 음수 시급 방지
         if (employee.getHourlyWage() == null || employee.getHourlyWage() < 0) {
             throw new IllegalArgumentException("올바르지 않은 시급 설정입니다.");
         }

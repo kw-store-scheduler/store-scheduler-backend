@@ -5,7 +5,7 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 
 @Entity
-@Table(name = "users") // "user"는 PostgreSQL 예약어이므로 테이블명을 명시합니다.
+@Table(name = "users") // user는 PostgreSQL 예약어
 @Getter
 @NoArgsConstructor
 public class User {
