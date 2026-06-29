@@ -2,11 +2,16 @@ package com.example.store_scheduler_backend.controller;
 
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.service.StoreService;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
+
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -17,38 +22,50 @@ public class StoreController {
 
     private final StoreService storeService;
 
-    /**
-     * 매장 등록 API
-     */
     @PostMapping
-    public ResponseEntity<Long> createStore(@RequestBody Store store) {
-        Long storeId = storeService.registerStore(store);
-        return ResponseEntity.ok(storeId);
+    public ResponseEntity<StoreCreateResponse> createStore(
+            @Valid @RequestBody StoreCreateRequest request,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        Store store = storeService.registerStore(request.getName(), request.getAddress(), userDetails.getUsername());
+        return ResponseEntity.ok(new StoreCreateResponse(store.getId(), store.getStoreCode()));
     }
 
-    /**
-     * 전체 매장 조회 API (무한 루프 방지 고도화)
-     */
+    @PostMapping("/{storeId}/reissue-code")
+    public ResponseEntity<StoreCreateResponse> reissueCode(
+            @PathVariable Long storeId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        String newCode = storeService.reissueCode(storeId, userDetails.getUsername());
+        return ResponseEntity.ok(new StoreCreateResponse(storeId, newCode));
+    }
+
     @GetMapping
-    public ResponseEntity<List<StoreResponseDto>> getAllStores() {
-        List<Store> findStores = storeService.findStores();
-
-        // 엔티티 -> DTO 객체로 변환 (무한 참조 가능성 차단)
-        List<StoreResponseDto> result = findStores.stream()
-                .map(s -> new StoreResponseDto(s.getId(), s.getName(), s.getAddress()))
+    public ResponseEntity<List<StoreResponse>> getAllStores() {
+        List<StoreResponse> result = storeService.findStores().stream()
+                .map(s -> new StoreResponse(s.getId(), s.getName(), s.getAddress(), s.getStoreCode()))
                 .collect(Collectors.toList());
-
         return ResponseEntity.ok(result);
     }
 
-    /**
-     * 외부 노출용 (DTO)
-     */
+    @Data
+    static class StoreCreateRequest {
+        @NotBlank(message = "매장 이름을 입력해주세요.")
+        private String name;
+        private String address;
+    }
+
     @Data
     @AllArgsConstructor
-    static class StoreResponseDto {
+    static class StoreCreateResponse {
+        private Long id;
+        private String storeCode;
+    }
+
+    @Data
+    @AllArgsConstructor
+    static class StoreResponse {
         private Long id;
         private String name;
         private String address;
+        private String storeCode;
     }
 }

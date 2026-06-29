@@ -9,17 +9,35 @@ import java.util.List;
 @Entity
 @Getter
 @NoArgsConstructor
-
 public class Store {
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
     @Column(nullable = false)
     private String name;
+
     private String address;
 
-    // 매장:직원 = 1:N
+    @Column(nullable = false, unique = true)
+    private String storeCode;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "owner_id", nullable = false)
+    private User owner;
+
     @OneToMany(mappedBy = "store", cascade = CascadeType.ALL)
     private List<Employee> employees = new ArrayList<>();
+
+    public Store(String name, String address, User owner, String storeCode) {
+        this.name = name;
+        this.address = address;
+        this.owner = owner;
+        this.storeCode = storeCode;
+    }
+
+    public void reissueCode(String newCode) {
+        this.storeCode = newCode;
+    }
 }
