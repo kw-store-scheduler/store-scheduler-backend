@@ -8,4 +8,5 @@ import java.util.List;
 @Repository
 public interface ScheduleRepository extends JpaRepository<Schedule, Long> {
     List<Schedule> findByStoreIdOrderByWorkDateAscStartTimeAsc(Long storeId);
+    List<Schedule> findByStoreIdAndEmployeeIdOrderByWorkDateAscStartTimeAsc(Long storeId, Long employeeId);
 }
