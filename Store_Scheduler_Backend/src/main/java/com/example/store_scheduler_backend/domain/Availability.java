@@ -16,10 +16,9 @@ public class Availability {
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "employee_id")
+    @JoinColumn(name = "employee_id", nullable = false)
     private Employee employee;
 
-    // DB에 요일 문자열로 저장
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private DayOfWeek dayOfWeek;
@@ -30,6 +29,16 @@ public class Availability {
     @Column(nullable = false)
     private LocalTime endTime;
 
-    public void setEmployee(Employee employee) {
-        this.employee = employee;}
+    public Availability(Employee employee, DayOfWeek dayOfWeek, LocalTime startTime, LocalTime endTime) {
+        this.employee = employee;
+        this.dayOfWeek = dayOfWeek;
+        this.startTime = startTime;
+        this.endTime = endTime;
+    }
+
+    public void update(DayOfWeek dayOfWeek, LocalTime startTime, LocalTime endTime) {
+        this.dayOfWeek = dayOfWeek;
+        this.startTime = startTime;
+        this.endTime = endTime;
+    }
 }
