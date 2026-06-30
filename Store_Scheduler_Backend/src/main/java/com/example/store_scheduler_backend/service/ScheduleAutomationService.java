@@ -30,9 +30,8 @@ public class ScheduleAutomationService {
     private final EmployeeRepository employeeRepository;
 
     @Transactional
-    public Map<String, Object> runOptimization(Map<String, Object> configData) {
+    public Map<String, Object> runOptimization(Long storeId, Map<String, Object> configData) {
         try {
-            // OS 환경 독립적인 파이썬 스크립트 상대 경로 설정
             String scriptPath = "src/main/resources/python/scheduler_core_0527.py";
             String pythonPath = "python";
 
@@ -40,14 +39,12 @@ public class ScheduleAutomationService {
             processBuilder.redirectErrorStream(true);
             Process process = processBuilder.start();
 
-            // JSON 직렬화, Python 프로세스 입력 스트림 전달
             String jsonInput = objectMapper.writeValueAsString(configData);
             try (BufferedWriter writer = new BufferedWriter(new OutputStreamWriter(process.getOutputStream(), "UTF-8"))) {
                 writer.write(jsonInput);
                 writer.flush();
             }
 
-            // Python 프로세스 실행 결과 수신
             StringBuilder output = new StringBuilder();
             try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream(), "UTF-8"))) {
                 String line;
@@ -62,7 +59,6 @@ public class ScheduleAutomationService {
                 throw new RuntimeException("파이썬 엔진 내부 오류 (Exit Code: " + exitCode + ")\n출력 내용: " + output.toString());
             }
 
-            // 결과 파싱 및 상태 코드 검증
             Map<String, Object> result = objectMapper.readValue(output.toString(), Map.class);
             String status = (String) result.get("status");
 
@@ -72,15 +68,13 @@ public class ScheduleAutomationService {
                 return result;
             }
 
-            // 최적화 성공 시 스케줄 DB 영속화
             if (result.containsKey("schedules")) {
                 List<Map<String, Object>> scheduleList = (List<Map<String, Object>>) result.get("schedules");
-                saveSchedulesToDB(scheduleList);
+                saveSchedulesToDB(storeId, scheduleList);
             }
 
             result.put("message", "스케줄 자동 생성 및 데이터베이스 저장 완료");
             result.put("success", true);
-
             return result;
 
         } catch (Exception e) {
@@ -88,14 +82,15 @@ public class ScheduleAutomationService {
         }
     }
 
-    private void saveSchedulesToDB(List<Map<String, Object>> scheduleList) {
+    private void saveSchedulesToDB(Long storeId, List<Map<String, Object>> scheduleList) {
         for (Map<String, Object> schedMap : scheduleList) {
             String employeeName = (String) schedMap.get("employeeName");
-            String dayOfWeekStr = (String) schedMap.get("dayOfWeek"); // ex) "MONDAY"
-            String startTimeStr = (String) schedMap.get("startTime"); // ex) "09:00:00"
-            String endTimeStr = (String) schedMap.get("endTime");     // ex) "13:00:00"
+            String dayOfWeekStr = (String) schedMap.get("dayOfWeek");
+            String startTimeStr = (String) schedMap.get("startTime");
+            String endTimeStr   = (String) schedMap.get("endTime");
 
-            Employee employee = employeeRepository.findByName(employeeName)
+            // 매장 내에서만 이름으로 검색해 크로스-매장 오염 방지
+            Employee employee = employeeRepository.findByStoreIdAndName(storeId, employeeName)
                     .orElseThrow(() -> new RuntimeException("해당 직원을 DB에서 찾을 수 없습니다: " + employeeName));
 
             Schedule schedule = new Schedule();
@@ -103,9 +98,7 @@ public class ScheduleAutomationService {
             schedule.setStore(employee.getStore());
 
             DayOfWeek targetDay = DayOfWeek.valueOf(dayOfWeekStr.toUpperCase());
-            LocalDate workDate = LocalDate.now().with(TemporalAdjusters.nextOrSame(targetDay));
-
-            schedule.setWorkDate(workDate);
+            schedule.setWorkDate(LocalDate.now().with(TemporalAdjusters.nextOrSame(targetDay)));
             schedule.setStartTime(LocalTime.parse(startTimeStr));
             schedule.setEndTime(LocalTime.parse(endTimeStr));
 
