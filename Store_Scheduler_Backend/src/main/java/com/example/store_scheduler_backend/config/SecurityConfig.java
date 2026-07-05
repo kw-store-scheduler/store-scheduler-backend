@@ -4,6 +4,7 @@ import com.example.store_scheduler_backend.security.JwtAuthenticationFilter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -36,6 +37,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/availabilities/my", "/api/availabilities", "/api/availabilities/**").hasRole("EMPLOYEE")
                         .requestMatchers("/api/stores").hasRole("MANAGER")
                         .requestMatchers("/api/stores/*/employees/**").hasRole("MANAGER")
+                        .requestMatchers(HttpMethod.GET, "/api/stores/*/skills").authenticated()
+                        .requestMatchers("/api/stores/*/skills/**").hasRole("MANAGER")
                         .requestMatchers("/api/stores/*/availabilities").hasRole("MANAGER")
                         .requestMatchers("/api/stores/*/shifts").authenticated()
                         .requestMatchers("/api/stores/*/schedules/automate").hasRole("MANAGER")

@@ -1,6 +1,7 @@
 package com.example.store_scheduler_backend.controller;
 
 import com.example.store_scheduler_backend.domain.Employee;
+import com.example.store_scheduler_backend.domain.Skill;
 import com.example.store_scheduler_backend.service.EmployeeService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
@@ -123,6 +124,7 @@ public class StoreEmployeeController {
         private String phoneNumber;
         private Integer hourlyWage;
         private String status;
+        private List<String> skills;
 
         static EmployeeResponse from(Employee e) {
             return new EmployeeResponse(
@@ -130,7 +132,8 @@ public class StoreEmployeeController {
                     e.getName(),
                     e.getPhoneNumber(),
                     e.getHourlyWage(),
-                    e.getStatus().name()
+                    e.getStatus().name(),
+                    e.getSkills().stream().map(Skill::getName).collect(Collectors.toList())
             );
         }
     }
