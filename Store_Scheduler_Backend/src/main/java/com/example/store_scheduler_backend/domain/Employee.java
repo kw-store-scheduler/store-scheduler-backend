@@ -3,6 +3,8 @@ package com.example.store_scheduler_backend.domain;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import java.util.HashSet;
+import java.util.Set;
 
 @Entity
 @Getter
@@ -32,6 +34,14 @@ public class Employee {
     @JoinColumn(name = "user_id")
     private User user;
 
+    @ManyToMany
+    @JoinTable(
+            name = "employee_skill",
+            joinColumns = @JoinColumn(name = "employee_id"),
+            inverseJoinColumns = @JoinColumn(name = "skill_id")
+    )
+    private Set<Skill> skills = new HashSet<>();
+
     public Employee(String name, String phoneNumber, Store store, User user) {
         this.name = name;
         this.phoneNumber = phoneNumber;
@@ -58,5 +68,13 @@ public class Employee {
         if (name != null && !name.isBlank()) this.name = name;
         if (phoneNumber != null) this.phoneNumber = phoneNumber;
         if (hourlyWage != null) this.hourlyWage = hourlyWage;
+    }
+
+    public void addSkill(Skill skill) {
+        this.skills.add(skill);
+    }
+
+    public void removeSkill(Skill skill) {
+        this.skills.remove(skill);
     }
 }
