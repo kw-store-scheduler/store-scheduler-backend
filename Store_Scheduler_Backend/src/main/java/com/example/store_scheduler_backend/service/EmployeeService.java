@@ -20,6 +20,7 @@ public class EmployeeService {
     private final EmployeeRepository employeeRepository;
     private final StoreRepository storeRepository;
     private final UserRepository userRepository;
+    private final FcmService fcmService;
 
     @Transactional
     public Employee joinStore(String storeCode, String name, String phoneNumber, String username) {
@@ -48,6 +49,12 @@ public class EmployeeService {
             throw new IllegalArgumentException("대기 중인 신청만 처리할 수 있습니다.");
         }
         employee.approve(hourlyWage);
+
+        fcmService.sendToDevice(
+                employee.getUser().getDeviceToken(),
+                "가입 신청 승인",
+                store.getName() + "에서 가입 신청이 승인되었습니다."
+        );
     }
 
     @Transactional
@@ -63,6 +70,12 @@ public class EmployeeService {
             throw new IllegalArgumentException("대기 중인 신청만 처리할 수 있습니다.");
         }
         employee.reject();
+
+        fcmService.sendToDevice(
+                employee.getUser().getDeviceToken(),
+                "가입 신청 거절",
+                store.getName() + "에서 가입 신청이 거절되었습니다."
+        );
     }
 
     public List<Employee> findApprovedByStore(Long storeId) {
