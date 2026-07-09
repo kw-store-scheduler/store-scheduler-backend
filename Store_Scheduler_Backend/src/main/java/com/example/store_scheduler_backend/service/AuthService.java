@@ -33,4 +33,11 @@ public class AuthService {
         }
         return jwtTokenProvider.createToken(user.getUsername(), user.getRole().name());
     }
+
+    @Transactional
+    public void updateDeviceToken(String username, String deviceToken) {
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
+        user.updateDeviceToken(deviceToken);
+    }
 }

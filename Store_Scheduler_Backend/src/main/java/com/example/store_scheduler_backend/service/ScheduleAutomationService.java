@@ -1,6 +1,7 @@
 package com.example.store_scheduler_backend.service;
 
 import com.example.store_scheduler_backend.domain.Employee;
+import com.example.store_scheduler_backend.domain.EmployeeStatus;
 import com.example.store_scheduler_backend.domain.Schedule;
 import tools.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +29,7 @@ public class ScheduleAutomationService {
     private final ObjectMapper objectMapper;
     private final ScheduleRepository scheduleRepository;
     private final EmployeeRepository employeeRepository;
+    private final FcmService fcmService;
 
     @Transactional
     public Map<String, Object> runOptimization(Long storeId, Map<String, Object> configData) {
@@ -71,6 +73,7 @@ public class ScheduleAutomationService {
             if (result.containsKey("schedules")) {
                 List<Map<String, Object>> scheduleList = (List<Map<String, Object>>) result.get("schedules");
                 saveSchedulesToDB(storeId, scheduleList);
+                notifyApprovedEmployees(storeId);
             }
 
             result.put("message", "스케줄 자동 생성 및 데이터베이스 저장 완료");
@@ -103,6 +106,17 @@ public class ScheduleAutomationService {
             schedule.setEndTime(LocalTime.parse(endTimeStr));
 
             scheduleRepository.save(schedule);
+        }
+    }
+
+    private void notifyApprovedEmployees(Long storeId) {
+        List<Employee> employees = employeeRepository.findByStoreIdAndStatus(storeId, EmployeeStatus.APPROVED);
+        for (Employee employee : employees) {
+            fcmService.sendToDevice(
+                    employee.getUser().getDeviceToken(),
+                    "근무표 업데이트",
+                    "새로운 근무표가 등록되었습니다. 확인해주세요."
+            );
         }
     }
 }

@@ -24,9 +24,15 @@ public class User {
     @Column(nullable = false)
     private Role role;
 
+    private String deviceToken;
+
     public User(String username, String password, Role role) {
         this.username = username;
         this.password = password;
         this.role = role;
+    }
+
+    public void updateDeviceToken(String deviceToken) {
+        this.deviceToken = deviceToken;
     }
 }
