@@ -4,8 +4,8 @@ spring:
 
   datasource:
     url: jdbc:postgresql://localhost:5432/scheduler_db
-    username: postgres
-    password: 1659
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
 
   jpa:
@@ -21,13 +21,8 @@ logging:
   level:
     org.hibernate.SQL: debug
 
-
 jwt:
-  # 문/숫자/특수문자 조합 32자 이상
-  secret: StoreSchedulerBackendSecretKeyForJwtAuthentication2026!
-  # 토큰 만료 시간 (1시간)
+  # 영문/숫자/특수문자 조합 32자 이상의 시크릿 키를 지정하세요
+  secret: ${JWT_SECRET}
+  # 토큰 만료 시간 (밀리초, 예: 3600000 = 1시간)
   expiration_time: 3600000
-
-fcm:
-  # resources 하위에 Firebase 서비스 계정 키(JSON)를 배치. 없으면 알림 발송은 자동으로 비활성화됨
-  credential-path: firebase-service-account.json
