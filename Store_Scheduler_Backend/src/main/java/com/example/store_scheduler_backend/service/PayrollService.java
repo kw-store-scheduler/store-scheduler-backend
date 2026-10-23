@@ -3,10 +3,8 @@ package com.example.store_scheduler_backend.service;
 import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.EmployeeStatus;
 import com.example.store_scheduler_backend.domain.Schedule;
-import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
 import com.example.store_scheduler_backend.repository.ScheduleRepository;
-import com.example.store_scheduler_backend.repository.StoreRepository;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -33,11 +31,10 @@ public class PayrollService {
 
     private final EmployeeRepository employeeRepository;
     private final ScheduleRepository scheduleRepository;
-    private final StoreRepository storeRepository;
+    private final StoreAccessGuard storeAccessGuard;
 
     public List<EmployeePayroll> calculateMonthlyPayroll(Long storeId, YearMonth yearMonth, String managerUsername) {
-        Store store = findStore(storeId);
-        verifyOwner(store, managerUsername);
+        storeAccessGuard.verifyOwner(storeId, managerUsername);
 
         LocalDate start = yearMonth.atDay(1);
         LocalDate end = yearMonth.atEndOfMonth();
@@ -87,17 +84,6 @@ public class PayrollService {
                 weeklyHolidayPay,
                 regularWage + weeklyHolidayPay
         );
-    }
-
-    private Store findStore(Long storeId) {
-        return storeRepository.findById(storeId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 매장입니다."));
-    }
-
-    private void verifyOwner(Store store, String username) {
-        if (!store.getOwner().getUsername().equals(username)) {
-            throw new IllegalArgumentException("해당 매장의 관리자만 접근할 수 있습니다.");
-        }
     }
 
     @Getter

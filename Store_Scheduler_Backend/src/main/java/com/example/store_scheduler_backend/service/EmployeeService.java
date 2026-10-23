@@ -21,6 +21,7 @@ public class EmployeeService {
     private final StoreRepository storeRepository;
     private final UserRepository userRepository;
     private final FcmService fcmService;
+    private final StoreAccessGuard storeAccessGuard;
 
     @Transactional
     public Employee joinStore(String storeCode, String name, String phoneNumber, String username) {
@@ -38,8 +39,7 @@ public class EmployeeService {
 
     @Transactional
     public void approve(Long storeId, Long employeeId, int hourlyWage, String managerUsername) {
-        Store store = findStore(storeId);
-        verifyOwner(store, managerUsername);
+        Store store = storeAccessGuard.verifyOwner(storeId, managerUsername);
 
         Employee employee = findOne(employeeId);
         if (!employee.getStore().getId().equals(storeId)) {
@@ -59,8 +59,7 @@ public class EmployeeService {
 
     @Transactional
     public void reject(Long storeId, Long employeeId, String managerUsername) {
-        Store store = findStore(storeId);
-        verifyOwner(store, managerUsername);
+        Store store = storeAccessGuard.verifyOwner(storeId, managerUsername);
 
         Employee employee = findOne(employeeId);
         if (!employee.getStore().getId().equals(storeId)) {
@@ -92,8 +91,7 @@ public class EmployeeService {
 
     @Transactional
     public void updateEmployee(Long storeId, Long employeeId, String name, String phoneNumber, Integer hourlyWage, String managerUsername) {
-        Store store = findStore(storeId);
-        verifyOwner(store, managerUsername);
+        storeAccessGuard.verifyOwner(storeId, managerUsername);
 
         Employee employee = findOne(employeeId);
         if (!employee.getStore().getId().equals(storeId)) {
@@ -107,14 +105,4 @@ public class EmployeeService {
                 .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 직원입니다."));
     }
 
-    private Store findStore(Long storeId) {
-        return storeRepository.findById(storeId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 매장입니다."));
-    }
-
-    private void verifyOwner(Store store, String username) {
-        if (!store.getOwner().getUsername().equals(username)) {
-            throw new IllegalArgumentException("해당 매장의 관리자만 접근할 수 있습니다.");
-        }
-    }
 }

@@ -3,8 +3,6 @@ package com.example.store_scheduler_backend.service;
 import com.example.store_scheduler_backend.domain.Shift;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.repository.ShiftRepository;
-import com.example.store_scheduler_backend.repository.StoreRepository;
-import com.example.store_scheduler_backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -18,18 +16,12 @@ import java.util.List;
 public class ShiftService {
 
     private final ShiftRepository shiftRepository;
-    private final StoreRepository storeRepository;
-    private final UserRepository userRepository;
+    private final StoreAccessGuard storeAccessGuard;
 
     @Transactional
     public Shift registerShift(Long storeId, String name, LocalTime startTime, LocalTime endTime,
                                int requiredStaff, DayOfWeek dayOfWeek, String managerUsername) {
-        Store store = storeRepository.findById(storeId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 매장입니다."));
-
-        if (!store.getOwner().getUsername().equals(managerUsername)) {
-            throw new IllegalArgumentException("해당 매장의 관리자만 근무 시간대를 등록할 수 있습니다.");
-        }
+        Store store = storeAccessGuard.verifyOwner(storeId, managerUsername);
 
         Shift shift = new Shift();
         shift.setName(name);
