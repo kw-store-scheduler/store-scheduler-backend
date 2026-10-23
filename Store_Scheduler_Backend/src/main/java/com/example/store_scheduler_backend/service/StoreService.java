@@ -17,6 +17,7 @@ public class StoreService {
 
     private final StoreRepository storeRepository;
     private final UserRepository userRepository;
+    private final StoreAccessGuard storeAccessGuard;
 
     @Transactional
     public Store registerStore(String name, String address, String ownerUsername) {
@@ -48,10 +49,7 @@ public class StoreService {
 
     @Transactional
     public String reissueCode(Long storeId, String managerUsername) {
-        Store store = findOne(storeId);
-        if (!store.getOwner().getUsername().equals(managerUsername)) {
-            throw new IllegalArgumentException("해당 매장의 관리자만 코드를 재발급할 수 있습니다.");
-        }
+        Store store = storeAccessGuard.verifyOwner(storeId, managerUsername);
         String newCode = UUID.randomUUID().toString().replace("-", "").substring(0, 8).toUpperCase();
         store.reissueCode(newCode);
         return newCode;

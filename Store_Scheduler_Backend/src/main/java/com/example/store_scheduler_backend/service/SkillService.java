@@ -5,7 +5,6 @@ import com.example.store_scheduler_backend.domain.Skill;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
 import com.example.store_scheduler_backend.repository.SkillRepository;
-import com.example.store_scheduler_backend.repository.StoreRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -17,13 +16,12 @@ import java.util.List;
 public class SkillService {
 
     private final SkillRepository skillRepository;
-    private final StoreRepository storeRepository;
     private final EmployeeRepository employeeRepository;
+    private final StoreAccessGuard storeAccessGuard;
 
     @Transactional
     public Skill createSkill(Long storeId, String name, String managerUsername) {
-        Store store = findStore(storeId);
-        verifyOwner(store, managerUsername);
+        Store store = storeAccessGuard.verifyOwner(storeId, managerUsername);
 
         if (skillRepository.existsByStoreIdAndName(storeId, name)) {
             throw new IllegalArgumentException("이미 등록된 스킬입니다.");
@@ -37,8 +35,7 @@ public class SkillService {
 
     @Transactional
     public void deleteSkill(Long storeId, Long skillId, String managerUsername) {
-        Store store = findStore(storeId);
-        verifyOwner(store, managerUsername);
+        storeAccessGuard.verifyOwner(storeId, managerUsername);
 
         Skill skill = findOne(skillId);
         if (!skill.getStore().getId().equals(storeId)) {
@@ -49,8 +46,7 @@ public class SkillService {
 
     @Transactional
     public void assignSkillToEmployee(Long storeId, Long employeeId, Long skillId, String managerUsername) {
-        Store store = findStore(storeId);
-        verifyOwner(store, managerUsername);
+        storeAccessGuard.verifyOwner(storeId, managerUsername);
 
         Employee employee = findEmployee(employeeId, storeId);
         Skill skill = findOne(skillId);
@@ -62,8 +58,7 @@ public class SkillService {
 
     @Transactional
     public void removeSkillFromEmployee(Long storeId, Long employeeId, Long skillId, String managerUsername) {
-        Store store = findStore(storeId);
-        verifyOwner(store, managerUsername);
+        storeAccessGuard.verifyOwner(storeId, managerUsername);
 
         Employee employee = findEmployee(employeeId, storeId);
         Skill skill = findOne(skillId);
@@ -82,16 +77,5 @@ public class SkillService {
             throw new IllegalArgumentException("해당 매장 소속 직원이 아닙니다.");
         }
         return employee;
-    }
-
-    private Store findStore(Long storeId) {
-        return storeRepository.findById(storeId)
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 매장입니다."));
-    }
-
-    private void verifyOwner(Store store, String username) {
-        if (!store.getOwner().getUsername().equals(username)) {
-            throw new IllegalArgumentException("해당 매장의 관리자만 접근할 수 있습니다.");
-        }
     }
 }

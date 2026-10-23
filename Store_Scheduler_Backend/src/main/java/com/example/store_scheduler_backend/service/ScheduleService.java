@@ -6,7 +6,6 @@ import com.example.store_scheduler_backend.domain.Schedule;
 import com.example.store_scheduler_backend.domain.User;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
 import com.example.store_scheduler_backend.repository.ScheduleRepository;
-import com.example.store_scheduler_backend.repository.StoreRepository;
 import com.example.store_scheduler_backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -24,7 +23,7 @@ public class ScheduleService {
     private final ScheduleRepository scheduleRepository;
     private final EmployeeRepository employeeRepository;
     private final UserRepository userRepository;
-    private final StoreRepository storeRepository;
+    private final StoreAccessGuard storeAccessGuard;
 
     public List<Schedule> findByStore(Long storeId) {
         return scheduleRepository.findByStoreIdOrderByWorkDateAscStartTimeAsc(storeId);
@@ -46,7 +45,7 @@ public class ScheduleService {
 
     @Transactional
     public Schedule update(Long storeId, Long scheduleId, LocalDate workDate, LocalTime startTime, LocalTime endTime, String managerUsername) {
-        verifyOwner(storeId, managerUsername);
+        storeAccessGuard.verifyOwner(storeId, managerUsername);
 
         Schedule schedule = findSchedule(scheduleId, storeId);
         schedule.setWorkDate(workDate);
@@ -57,7 +56,7 @@ public class ScheduleService {
 
     @Transactional
     public void delete(Long storeId, Long scheduleId, String managerUsername) {
-        verifyOwner(storeId, managerUsername);
+        storeAccessGuard.verifyOwner(storeId, managerUsername);
         Schedule schedule = findSchedule(scheduleId, storeId);
         scheduleRepository.delete(schedule);
     }
@@ -69,11 +68,5 @@ public class ScheduleService {
             throw new IllegalArgumentException("해당 매장의 스케줄이 아닙니다.");
         }
         return schedule;
-    }
-
-    private void verifyOwner(Long storeId, String username) {
-        storeRepository.findById(storeId)
-                .filter(s -> s.getOwner().getUsername().equals(username))
-                .orElseThrow(() -> new IllegalArgumentException("해당 매장의 관리자만 접근할 수 있습니다."));
     }
 }
