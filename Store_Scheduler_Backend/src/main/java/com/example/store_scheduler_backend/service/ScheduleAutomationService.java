@@ -1,6 +1,8 @@
 package com.example.store_scheduler_backend.service;
 
 import com.example.store_scheduler_backend.domain.Availability;
+import com.example.store_scheduler_backend.domain.DayOffRequest;
+import com.example.store_scheduler_backend.domain.DayOffType;
 import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.EmployeeStatus;
 import com.example.store_scheduler_backend.domain.Schedule;
@@ -11,9 +13,11 @@ import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.dto.ScheduleProposalResponse;
 import com.example.store_scheduler_backend.dto.ScheduleProposalResponse.Assignment;
 import com.example.store_scheduler_backend.dto.ScheduleProposalResponse.Candidate;
+import com.example.store_scheduler_backend.dto.ScheduleProposalResponse.DayOffViolation;
 import com.example.store_scheduler_backend.dto.ScheduleProposalResponse.EmployeeSummary;
 import com.example.store_scheduler_backend.dto.ScheduleProposalResponse.Shortage;
 import com.example.store_scheduler_backend.repository.AvailabilityRepository;
+import com.example.store_scheduler_backend.repository.DayOffRequestRepository;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
 import com.example.store_scheduler_backend.repository.ScheduleProposalRepository;
 import com.example.store_scheduler_backend.repository.ScheduleRepository;
@@ -63,6 +67,7 @@ public class ScheduleAutomationService {
     private final ScheduleRepository scheduleRepository;
     private final ScheduleProposalRepository proposalRepository;
     private final ShiftSkillRequirementRepository requirementRepository;
+    private final DayOffRequestRepository dayOffRequestRepository;
     private final ObjectMapper objectMapper;
 
     // weekStart(월요일)부터 7일간의 근무표 후보안을 만든다. 확정 전까지 근무표는 바뀌지 않는다.
@@ -85,7 +90,10 @@ public class ScheduleAutomationService {
                 storeId, weekStart, weekStart.plusDays(DAYS_IN_WEEK - 1));
 
         List<ShiftSkillRequirement> skillRequirements = requirementRepository.findByShift_Store_Id(storeId);
+        List<DayOffRequest> dayOffs = dayOffRequestRepository.findByEmployee_StoreIdAndDateBetweenOrderByDateAsc(
+                storeId, weekStart, weekStart.plusDays(DAYS_IN_WEEK - 1));
         Map<String, Object> config = buildEngineConfig(storeId, employees, shifts, skillRequirements);
+        addOffRequests(config, dayOffs, weekStart);
         config.put("prev_assignments", toPrevAssignments(current, weekStart, employees, shifts));
         Map<String, Object> result = pythonEngineRunner.run(config);
         String status = (String) result.get("status");
@@ -94,7 +102,7 @@ public class ScheduleAutomationService {
             return ScheduleProposalResponse.failed(status, weekStart);
         }
 
-        List<Candidate> candidates = toCandidates(result, weekStart, employees, shifts, current);
+        List<Candidate> candidates = toCandidates(result, weekStart, employees, shifts, current, dayOffs);
         List<Shortage> shortages = new ArrayList<>(toShortages(result.get("shortage_report"), weekStart, shifts));
         shortages.addAll(toSkillShortages(result.get("skill_shortage_report"), weekStart, shifts, skillRequirements));
         Long solveMs = toLong(result.get("solve_ms"));
@@ -157,6 +165,20 @@ public class ScheduleAutomationService {
         return config;
     }
 
+    @SuppressWarnings("unchecked")
+    private void addOffRequests(Map<String, Object> config, List<DayOffRequest> dayOffs, LocalDate weekStart) {
+        Map<Long, List<Map<String, Object>>> byEmployee = dayOffs.stream()
+                .collect(Collectors.groupingBy(r -> r.getEmployee().getId(), Collectors.mapping(
+                        r -> Map.<String, Object>of(
+                                "day", (int) ChronoUnit.DAYS.between(weekStart, r.getDate()),
+                                "type", r.getType() == DayOffType.MUST ? "must" : "prefer"),
+                        Collectors.toList())));
+        for (Map<String, Object> employee : (List<Map<String, Object>>) config.get("employees")) {
+            Long id = Long.valueOf(((String) employee.get("id")).substring(EMPLOYEE_KEY_PREFIX.length()));
+            employee.put("off_requests", byEmployee.getOrDefault(id, List.of()));
+        }
+    }
+
     // 스킬 이름은 바뀔 수 있어서 엔진에는 id로 넘긴다
     private List<Map<String, Object>> toEngineSkillRequirements(List<ShiftSkillRequirement> skillRequirements, List<Shift> shifts) {
         List<Map<String, Object>> requirements = new ArrayList<>();
@@ -206,7 +228,7 @@ public class ScheduleAutomationService {
     // 엔진의 대표 해(schedule)를 0번, 동일 비용의 대안 해(alt_schedules)를 1번부터 후보안으로 만든다
     @SuppressWarnings("unchecked")
     private List<Candidate> toCandidates(Map<String, Object> result, LocalDate weekStart, List<Employee> employees,
-                                         List<Shift> shifts, List<Schedule> current) {
+                                         List<Shift> shifts, List<Schedule> current, List<DayOffRequest> dayOffs) {
         List<List<Map<String, Object>>> solutions = new ArrayList<>();
         solutions.add((List<Map<String, Object>>) result.get("schedule"));
         Object alternatives = result.get("alt_schedules");
@@ -224,7 +246,8 @@ public class ScheduleAutomationService {
         for (int i = 0; i < solutions.size(); i++) {
             List<Assignment> assignments = toAssignments(solutions.get(i), weekStart, employeeByKey, shifts);
             candidates.add(new Candidate(i, estimateCost(assignments, employees),
-                    countChanges(assignments, currentSlots), summarize(assignments, employees), assignments));
+                    countChanges(assignments, currentSlots), summarize(assignments, employees), assignments,
+                    findDayOffViolations(assignments, dayOffs)));
         }
         return candidates;
     }
@@ -260,6 +283,19 @@ public class ScheduleAutomationService {
             total += isNightShift(a.startTime(), a.endTime()) ? Math.round(base * (1 + NIGHT_BONUS_RATE)) : base;
         }
         return total;
+    }
+
+    private List<DayOffViolation> findDayOffViolations(List<Assignment> assignments, List<DayOffRequest> dayOffs) {
+        Map<String, DayOffRequest> dayOffBySlot = dayOffs.stream()
+                .collect(Collectors.toMap(r -> r.getEmployee().getId() + "|" + r.getDate(), Function.identity()));
+        List<DayOffViolation> violations = new ArrayList<>();
+        for (Assignment a : assignments) {
+            DayOffRequest dayOff = dayOffBySlot.get(a.employeeId() + "|" + a.workDate());
+            if (dayOff != null) {
+                violations.add(new DayOffViolation(a.employeeId(), a.employeeName(), a.workDate(), dayOff.getType().name()));
+            }
+        }
+        return violations;
     }
 
     private int countChanges(List<Assignment> assignments, Set<String> currentSlots) {

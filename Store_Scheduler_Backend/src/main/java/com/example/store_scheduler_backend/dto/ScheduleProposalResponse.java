@@ -43,7 +43,12 @@ public class ScheduleProposalResponse {
 
     // changedFromCurrent: 생성 시점의 확정 근무표와 비교해 달라진 칸 수 (추가 + 삭제)
     public record Candidate(int index, long estimatedCost, int changedFromCurrent,
-                            List<EmployeeSummary> employees, List<Assignment> assignments) {
+                            List<EmployeeSummary> employees, List<Assignment> assignments,
+                            List<DayOffViolation> dayOffViolations) {
+    }
+
+    // 휴무를 신청한 날에 배정된 근무
+    public record DayOffViolation(Long employeeId, String employeeName, LocalDate date, String type) {
     }
 
     public record EmployeeSummary(Long employeeId, String name, int workDays, int hours) {

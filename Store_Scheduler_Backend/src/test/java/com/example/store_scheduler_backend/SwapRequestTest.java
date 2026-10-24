@@ -1,6 +1,8 @@
 package com.example.store_scheduler_backend;
 
 import com.example.store_scheduler_backend.domain.Availability;
+import com.example.store_scheduler_backend.domain.DayOffRequest;
+import com.example.store_scheduler_backend.domain.DayOffType;
 import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.Role;
 import com.example.store_scheduler_backend.domain.Schedule;
@@ -8,6 +10,7 @@ import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.domain.SwapStatus;
 import com.example.store_scheduler_backend.domain.User;
 import com.example.store_scheduler_backend.repository.AvailabilityRepository;
+import com.example.store_scheduler_backend.repository.DayOffRequestRepository;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
 import com.example.store_scheduler_backend.repository.ScheduleRepository;
 import com.example.store_scheduler_backend.repository.StoreRepository;
@@ -57,6 +60,7 @@ class SwapRequestTest {
     @Autowired AvailabilityRepository availabilityRepository;
     @Autowired ScheduleRepository scheduleRepository;
     @Autowired SwapRequestRepository swapRequestRepository;
+    @Autowired DayOffRequestRepository dayOffRequestRepository;
 
     private Store store;
     private Employee requester;
@@ -107,6 +111,22 @@ class SwapRequestTest {
         assertThat(reasonOf(candidates, "같은날")).isEqualTo("같은 날 다른 근무가 있음");
         assertThat(reasonOf(candidates, "저녁만")).contains("가용 시간");
         assertThat(reasonOf(candidates, "연속")).isEqualTo("연속 5일 근무가 됨");
+    }
+
+    @Test
+    void 필수_휴무_신청자는_대타에서_제외하고_희망_휴무_신청자는_뒤로_미룬다() throws Exception {
+        dayOffRequestRepository.save(new DayOffRequest(free, TARGET, DayOffType.PREFER, null));
+        dayOffRequestRepository.save(new DayOffRequest(busy, TARGET, DayOffType.MUST, null));
+        long requestId = requestSwap();
+
+        JsonNode candidates = read(as("owner", Role.MANAGER, get(candidatesUrl(requestId))).andExpect(status().isOk()));
+
+        assertThat(reasonOf(candidates, "바쁨")).isEqualTo("필수 휴무 신청일");
+        JsonNode first = candidates.get(0);
+        assertThat(first.get("name").asText()).isEqualTo("여유");
+        assertThat(first.get("eligible").asBoolean()).isTrue();
+        assertThat(first.get("reasons").get(0).asText()).isEqualTo("희망 휴무 신청일");
+        offer(requestId, busy).andExpect(status().isBadRequest());
     }
 
     @Test
