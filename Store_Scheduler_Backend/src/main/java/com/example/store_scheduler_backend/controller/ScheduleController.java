@@ -1,13 +1,15 @@
 package com.example.store_scheduler_backend.controller;
 
 import com.example.store_scheduler_backend.domain.Schedule;
-import com.example.store_scheduler_backend.dto.ScheduleGenerationResponse;
+import com.example.store_scheduler_backend.dto.ScheduleProposalResponse;
 import com.example.store_scheduler_backend.dto.ScheduleResponseDto;
 import com.example.store_scheduler_backend.service.ScheduleAutomationService;
+import com.example.store_scheduler_backend.service.ScheduleProposalService;
 import com.example.store_scheduler_backend.service.ScheduleService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotNull;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -32,18 +34,39 @@ public class ScheduleController {
 
     private final ScheduleAutomationService automationService;
     private final ScheduleService scheduleService;
+    private final ScheduleProposalService proposalService;
 
-    @Operation(summary = "주간 근무표 자동 생성",
-            description = "weekStart(월요일)부터 7일간의 근무표를 생성합니다. 생략하면 다음 주 월요일 기준입니다. 같은 주에 기존 근무표가 있으면 교체됩니다.")
+    @Operation(summary = "주간 근무표 후보안 생성",
+            description = "weekStart(월요일)부터 7일간의 근무표 후보안을 생성합니다. 생략하면 다음 주 월요일 기준입니다. 확정하기 전까지 근무표는 바뀌지 않습니다.")
     @PostMapping("/automate")
-    public ResponseEntity<ScheduleGenerationResponse> automateSchedule(
+    public ResponseEntity<ScheduleProposalResponse> automateSchedule(
             @PathVariable Long storeId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate weekStart,
             @AuthenticationPrincipal UserDetails userDetails) {
         LocalDate targetWeek = weekStart != null
                 ? weekStart
                 : LocalDate.now().with(TemporalAdjusters.next(DayOfWeek.MONDAY));
-        return ResponseEntity.ok(automationService.generateWeeklySchedule(storeId, targetWeek, userDetails.getUsername()));
+        return ResponseEntity.ok(automationService.generateProposal(storeId, targetWeek, userDetails.getUsername()));
+    }
+
+    // 관리자: 근무표 후보안 조회
+    @GetMapping("/proposals/{proposalId}")
+    public ResponseEntity<ScheduleProposalResponse> getProposal(
+            @PathVariable Long storeId,
+            @PathVariable Long proposalId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        return ResponseEntity.ok(proposalService.getProposal(storeId, proposalId, userDetails.getUsername()));
+    }
+
+    // 관리자: 후보안 중 하나로 근무표 확정
+    @Operation(summary = "근무표 후보안 확정", description = "선택한 후보안으로 해당 주 근무표를 교체하고 직원들에게 알림을 보냅니다.")
+    @PostMapping("/proposals/{proposalId}/confirm")
+    public ResponseEntity<ScheduleProposalResponse> confirmProposal(
+            @PathVariable Long storeId,
+            @PathVariable Long proposalId,
+            @Valid @RequestBody ConfirmRequest request,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        return ResponseEntity.ok(proposalService.confirm(storeId, proposalId, request.getCandidateIndex(), userDetails.getUsername()));
     }
 
     // 관리자/직원: 매장 전체 근무표 조회
@@ -87,6 +110,13 @@ public class ScheduleController {
             @AuthenticationPrincipal UserDetails userDetails) {
         scheduleService.delete(storeId, scheduleId, userDetails.getUsername());
         return ResponseEntity.noContent().build();
+    }
+
+    @Data
+    static class ConfirmRequest {
+        @NotNull(message = "확정할 후보안 번호를 입력해주세요.")
+        @Min(value = 0, message = "후보안 번호는 0 이상이어야 합니다.")
+        private Integer candidateIndex;
     }
 
     @Data

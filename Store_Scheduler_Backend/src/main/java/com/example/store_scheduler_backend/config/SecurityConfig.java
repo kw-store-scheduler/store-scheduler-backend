@@ -43,6 +43,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/stores/*/payroll").hasRole("MANAGER")
                         .requestMatchers("/api/stores/*/shifts").authenticated()
                         .requestMatchers("/api/stores/*/schedules/automate").hasRole("MANAGER")
+                        .requestMatchers("/api/stores/*/schedules/proposals/**").hasRole("MANAGER")
                         .requestMatchers("/api/stores/*/schedules").authenticated()
                         .anyRequest().authenticated()
                 )

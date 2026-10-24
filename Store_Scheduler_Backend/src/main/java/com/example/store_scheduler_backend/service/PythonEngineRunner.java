@@ -18,17 +18,8 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
-/**
- * CP-SAT 파이썬 엔진을 서브프로세스로 실행한다.
- *
- * 기존에는 "src/main/resources/python/..." 상대경로를 그대로 실행해서
- * 프로젝트 루트에서 bootRun 할 때만 동작하고 jar 배포 시에는 스크립트를 찾지 못했다.
- * 클래스패스의 엔진 디렉토리(python/*.py)를 기동 시점에 임시 디렉토리로 꺼내 두고,
- * 진입 스크립트를 그 경로로 실행한다. (진입 스크립트가 같은 디렉토리의 엔진 모듈을 import)
- *
- * 입출력 규약: stdin으로 config JSON을 받고, stdout으로 결과 JSON 한 개를 출력한다.
- * stderr는 결과 파싱을 방해하지 않도록 따로 모아 로그와 오류 메시지에만 사용한다.
- */
+// CP-SAT 파이썬 엔진을 서브프로세스로 실행한다. (stdin: config JSON → stdout: 결과 JSON)
+// jar 배포 시에도 동작하도록 클래스패스의 python/*.py를 기동 시점에 임시 디렉토리로 꺼내 두고 실행한다.
 @Slf4j
 @Component
 public class PythonEngineRunner {

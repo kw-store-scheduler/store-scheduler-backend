@@ -7,7 +7,8 @@ import com.example.store_scheduler_backend.domain.Schedule;
 import com.example.store_scheduler_backend.domain.Shift;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.domain.User;
-import com.example.store_scheduler_backend.dto.ScheduleGenerationResponse;
+import com.example.store_scheduler_backend.dto.ScheduleProposalResponse;
+import com.example.store_scheduler_backend.dto.ScheduleProposalResponse.Candidate;
 import com.example.store_scheduler_backend.repository.AvailabilityRepository;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
 import com.example.store_scheduler_backend.repository.ScheduleRepository;
@@ -115,22 +116,64 @@ class ScheduleEngineConfigTest {
 
         assertThat((List<Map<String, Object>>) config.get("prev_assignments")).containsExactly(
                 Map.of("employee_id", "emp_" + employee.getId(), "day", MON, "shift", OPEN));
-        // 엔진 결과(빈 근무표)로 교체되었는지
-        assertThat(scheduleRepository.findByStoreIdAndWorkDateBetween(store.getId(), WEEK_START, WEEK_START.plusDays(6))).isEmpty();
+        // 후보안 생성만으로는 기존 근무표를 건드리지 않는다
+        assertThat(scheduleRepository.findByStoreIdAndWorkDateBetween(store.getId(), WEEK_START, WEEK_START.plusDays(6))).hasSize(1);
     }
 
     @Test
     void 요일_전용_교대는_해당_요일이_아니면_인원_부족으로_보고하지_않는다() {
-        ScheduleGenerationResponse response = automationService.generateWeeklySchedule(store.getId(), WEEK_START, "owner");
+        ScheduleProposalResponse response = automationService.generateProposal(store.getId(), WEEK_START, "owner");
 
         assertThat(response.getShortages()).hasSize(1);
-        assertThat(response.getShortages().get(0).getDate()).isEqualTo(WEEK_START.plusDays(SAT));
-        assertThat(response.getShortages().get(0).getShiftName()).isEqualTo("토요특근");
+        assertThat(response.getShortages().get(0).date()).isEqualTo(WEEK_START.plusDays(SAT));
+        assertThat(response.getShortages().get(0).shiftName()).isEqualTo("토요특근");
+    }
+
+    @Test
+    void 대안_해가_있으면_후보안마다_직원별_시급으로_비용과_변경_칸_수를_계산한다() {
+        Employee senior = new Employee("시니어", null, store, userRepository.save(new User("senior", "pw", Role.EMPLOYEE)));
+        senior.approve(12000);
+        employeeRepository.save(senior);
+        Schedule existing = new Schedule();
+        existing.setStore(store);
+        existing.setEmployee(employee);
+        existing.setWorkDate(WEEK_START);
+        existing.setStartTime(LocalTime.of(9, 0));
+        existing.setEndTime(LocalTime.of(13, 0));
+        scheduleRepository.save(existing);
+
+        // 0번: 기존과 같이 오전형이 월 오픈 / 1번: 시니어가 월 오픈, 2번: 시니어가 토 마감(야간)
+        when(pythonEngineRunner.run(any())).thenReturn(Map.of(
+                "status", "OPTIMAL", "cost", 0, "solve_ms", 1, "shortage_report", List.of(),
+                "schedule", List.of(assigned(employee, MON, OPEN), assigned(senior)),
+                "alt_schedules", List.of(
+                        List.of(assigned(employee), assigned(senior, MON, OPEN)),
+                        List.of(assigned(employee), assigned(senior, SAT, CLOSE)))));
+
+        List<Candidate> candidates = automationService.generateProposal(store.getId(), WEEK_START, "owner").getCandidates();
+
+        assertThat(candidates).hasSize(3);
+        assertThat(candidates).extracting(Candidate::estimatedCost).containsExactly(
+                4L * 10030, 4L * 12000, Math.round(4L * 12000 * 1.5));
+        assertThat(candidates).extracting(Candidate::changedFromCurrent).containsExactly(0, 2, 2);
+        assertThat(candidates.get(1).employees()).filteredOn(e -> e.name().equals("시니어"))
+                .singleElement().satisfies(e -> {
+                    assertThat(e.workDays()).isEqualTo(1);
+                    assertThat(e.hours()).isEqualTo(4);
+                });
+    }
+
+    private Map<String, Object> assigned(Employee e, int... dayShiftPairs) {
+        List<Map<String, Integer>> slots = new java.util.ArrayList<>();
+        for (int i = 0; i < dayShiftPairs.length; i += 2) {
+            slots.add(Map.of("day", dayShiftPairs[i], "shift", dayShiftPairs[i + 1]));
+        }
+        return Map.of("employee_id", "emp_" + e.getId(), "assignments", slots);
     }
 
     @SuppressWarnings("unchecked")
     private Map<String, Object> generateAndCaptureConfig() {
-        automationService.generateWeeklySchedule(store.getId(), WEEK_START, "owner");
+        automationService.generateProposal(store.getId(), WEEK_START, "owner");
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
         verify(pythonEngineRunner).run(captor.capture());
         return captor.getValue();
