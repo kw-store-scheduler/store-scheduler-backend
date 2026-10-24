@@ -36,4 +36,4 @@ build/
 Store_Scheduler_Backend/build/
 
 # Secrets - 추적 제외
-Store_Scheduler_Backend/src/main/resources/application.yaml
+Store_Scheduler_Backend/src/main/resources/firebase-service-account.json

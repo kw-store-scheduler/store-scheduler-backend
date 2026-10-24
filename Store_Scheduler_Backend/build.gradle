@@ -45,3 +45,8 @@ dependencies {
 tasks.named('test') {
     useJUnitPlatform()
 }
+
+// 로컬 실행 시 docker-compose DB 설정(application-local.yaml)을 사용
+tasks.named('bootRun') {
+    systemProperty 'spring.profiles.active', System.getenv('SPRING_PROFILES_ACTIVE') ?: 'local'
+}

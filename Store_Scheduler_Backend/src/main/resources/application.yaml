@@ -2,8 +2,10 @@ spring:
   application:
     name: Store_Scheduler_Backend
 
+  # 접속 정보와 시크릿은 환경변수로 주입한다.
+  # 로컬 개발 기본값은 application-local.yaml에 있으며 ./gradlew bootRun 시 자동 적용된다.
   datasource:
-    url: jdbc:postgresql://localhost:5432/scheduler_db
+    url: ${DB_URL}
     username: ${DB_USERNAME}
     password: ${DB_PASSWORD}
     driver-class-name: org.postgresql.Driver
@@ -22,7 +24,7 @@ logging:
     org.hibernate.SQL: debug
 
 jwt:
-  # 영문/숫자/특수문자 조합 32자 이상의 시크릿 키를 지정하세요
+  # 영문/숫자/특수문자 조합 32자 이상. 기본값을 두지 않아, 지정하지 않으면 기동에 실패한다.
   secret: ${JWT_SECRET}
   # 토큰 만료 시간 (밀리초, 예: 3600000 = 1시간)
-  expiration_time: 3600000
+  expiration_time: ${JWT_EXPIRATION_TIME:3600000}
