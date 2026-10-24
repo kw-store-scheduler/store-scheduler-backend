@@ -28,3 +28,10 @@ jwt:
   secret: ${JWT_SECRET}
   # 토큰 만료 시간 (밀리초, 예: 3600000 = 1시간)
   expiration_time: ${JWT_EXPIRATION_TIME:3600000}
+
+scheduler:
+  engine:
+    # 파이썬 실행 명령. 가상환경을 쓰는 경우 해당 python 경로를 지정한다.
+    python-command: ${PYTHON_COMMAND:python3}
+    # 엔진 응답 대기 한도(초). 솔버 time_limit보다 여유 있게 잡는다.
+    timeout-seconds: ${ENGINE_TIMEOUT_SECONDS:60}
