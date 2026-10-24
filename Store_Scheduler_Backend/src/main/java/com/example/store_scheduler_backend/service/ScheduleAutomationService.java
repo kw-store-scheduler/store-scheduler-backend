@@ -19,11 +19,13 @@ import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -32,6 +34,11 @@ import java.util.stream.Collectors;
  *
  * 엔진은 직원을 "emp_{id}", 날짜를 주 시작일 기준 인덱스(0=월 ~ 6=일), 근무 시간대를 shifts 배열 인덱스로 다룬다.
  * 이 클래스가 그 인덱스와 실제 Employee / 날짜 / Shift 사이의 변환을 맡는다.
+ *
+ * 엔진에 넘기는 근무 가능 여부
+ * - available_days: 가용 시간을 등록한 요일
+ * - unavailable_slots: 그 요일 중 가용 시간 안에 들어가지 않는 교대, 해당 요일 전용이 아닌 교대
+ * - prev_assignments: 같은 주를 다시 생성할 때 기존 근무표 (변경 최소화)
  */
 @Service
 @RequiredArgsConstructor
@@ -43,6 +50,8 @@ public class ScheduleAutomationService {
     private static final double NIGHT_BONUS_RATE = 0.5;
     private static final LocalTime NIGHT_START = LocalTime.of(22, 0);
     private static final LocalTime NIGHT_END = LocalTime.of(6, 0);
+    // 가용 시간은 자정을 넘겨 등록할 수 없으므로, 23:59까지 가능하면 마감(자정 넘김) 근무도 가능한 것으로 본다
+    private static final LocalTime END_OF_DAY = LocalTime.of(23, 59);
 
     private final PythonEngineRunner pythonEngineRunner;
     private final StoreAccessGuard storeAccessGuard;
@@ -71,7 +80,12 @@ public class ScheduleAutomationService {
             throw new IllegalArgumentException("승인된 직원 또는 등록된 근무 시간대(Shift)가 없습니다.");
         }
 
-        Map<String, Object> result = pythonEngineRunner.run(buildEngineConfig(storeId, employees, shifts));
+        LocalDate weekEnd = weekStart.plusDays(DAYS_IN_WEEK - 1);
+        List<Schedule> previous = scheduleRepository.findByStoreIdAndWorkDateBetween(storeId, weekStart, weekEnd);
+
+        Map<String, Object> config = buildEngineConfig(storeId, employees, shifts);
+        config.put("prev_assignments", toPrevAssignments(previous, weekStart, employees, shifts));
+        Map<String, Object> result = pythonEngineRunner.run(config);
         String status = (String) result.get("status");
 
         @SuppressWarnings("unchecked")
@@ -80,7 +94,8 @@ public class ScheduleAutomationService {
             return ScheduleGenerationResponse.failed(status, weekStart);
         }
 
-        int savedCount = replaceWeekSchedules(store, weekStart, employees, shifts, assigned);
+        scheduleRepository.deleteAll(previous);
+        int savedCount = saveSchedules(store, weekStart, employees, shifts, assigned);
         notifyEmployees(employees);
 
         return ScheduleGenerationResponse.success(
@@ -93,10 +108,10 @@ public class ScheduleAutomationService {
     }
 
     private Map<String, Object> buildEngineConfig(Long storeId, List<Employee> employees, List<Shift> shifts) {
-        Map<Long, List<Integer>> availableDaysByEmployee = availabilityRepository.findByEmployee_StoreId(storeId).stream()
+        Map<Long, Map<Integer, Availability>> availabilityByEmployee = availabilityRepository.findByEmployee_StoreId(storeId).stream()
                 .collect(Collectors.groupingBy(
                         a -> a.getEmployee().getId(),
-                        Collectors.mapping(this::toDayIndex, Collectors.toList())));
+                        Collectors.toMap(this::toDayIndex, Function.identity())));
 
         List<Integer> allShiftIndices = new ArrayList<>();
         for (int i = 0; i < shifts.size(); i++) {
@@ -108,7 +123,9 @@ public class ScheduleAutomationService {
             Map<String, Object> config = new HashMap<>();
             config.put("id", employeeKey(employee));
             config.put("name", employee.getName());
-            config.put("available_days", availableDaysByEmployee.getOrDefault(employee.getId(), List.of()));
+            Map<Integer, Availability> availabilityByDay = availabilityByEmployee.getOrDefault(employee.getId(), Map.of());
+            config.put("available_days", new ArrayList<>(availabilityByDay.keySet()));
+            config.put("unavailable_slots", unavailableSlots(availabilityByDay, shifts));
             config.put("preferred_shifts", allShiftIndices);
             employeeConfigs.add(config);
         }
@@ -137,11 +154,56 @@ public class ScheduleAutomationService {
         return config;
     }
 
-    @SuppressWarnings("unchecked")
-    private int replaceWeekSchedules(Store store, LocalDate weekStart, List<Employee> employees,
-                                     List<Shift> shifts, List<Map<String, Object>> assigned) {
-        scheduleRepository.deleteByStoreIdAndWorkDateBetween(store.getId(), weekStart, weekStart.plusDays(DAYS_IN_WEEK - 1));
+    /**
+     * 가용 시간을 등록한 요일 중, 근무가 불가능한 (요일, 교대) 목록
+     */
+    private List<Map<String, Integer>> unavailableSlots(Map<Integer, Availability> availabilityByDay, List<Shift> shifts) {
+        List<Map<String, Integer>> slots = new ArrayList<>();
+        availabilityByDay.forEach((day, availability) -> {
+            for (int s = 0; s < shifts.size(); s++) {
+                Shift shift = shifts.get(s);
+                if (!isShiftOpenOn(shift, day) || !fitsAvailability(shift.getStartTime(), shift.getEndTime(),
+                        availability.getStartTime(), availability.getEndTime())) {
+                    slots.add(Map.of("day", day, "shift", s));
+                }
+            }
+        });
+        return slots;
+    }
 
+    /**
+     * 기존 근무표를 엔진의 (직원, 요일, 교대) 형식으로 변환한다.
+     * 이후 삭제된 교대나 승인 취소된 직원의 근무처럼 현재 설정과 맞지 않는 건은 제외한다.
+     */
+    private List<Map<String, Object>> toPrevAssignments(List<Schedule> previous, LocalDate weekStart,
+                                                        List<Employee> employees, List<Shift> shifts) {
+        Set<Long> employeeIds = employees.stream().map(Employee::getId).collect(Collectors.toSet());
+        List<Map<String, Object>> prev = new ArrayList<>();
+        for (Schedule schedule : previous) {
+            int shiftIndex = indexOfShift(shifts, schedule.getStartTime(), schedule.getEndTime());
+            if (shiftIndex < 0 || !employeeIds.contains(schedule.getEmployee().getId())) {
+                continue;
+            }
+            prev.add(Map.of(
+                    "employee_id", employeeKey(schedule.getEmployee()),
+                    "day", (int) ChronoUnit.DAYS.between(weekStart, schedule.getWorkDate()),
+                    "shift", shiftIndex));
+        }
+        return prev;
+    }
+
+    private int indexOfShift(List<Shift> shifts, LocalTime start, LocalTime end) {
+        for (int i = 0; i < shifts.size(); i++) {
+            if (shifts.get(i).getStartTime().equals(start) && shifts.get(i).getEndTime().equals(end)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    @SuppressWarnings("unchecked")
+    private int saveSchedules(Store store, LocalDate weekStart, List<Employee> employees,
+                              List<Shift> shifts, List<Map<String, Object>> assigned) {
         Map<String, Employee> employeeByKey = employees.stream()
                 .collect(Collectors.toMap(this::employeeKey, Function.identity()));
 
@@ -173,6 +235,8 @@ public class ScheduleAutomationService {
             return List.of();
         }
         return ((List<Map<String, Object>>) report).stream()
+                // 특정 요일 전용 교대는 다른 요일에 아무도 배정될 수 없으므로 부족으로 보지 않는다
+                .filter(r -> isShiftOpenOn(shifts.get(toInt(r.get("shift"))), toInt(r.get("day"))))
                 .map(r -> new ScheduleGenerationResponse.Shortage(
                         weekStart.plusDays(toInt(r.get("day"))),
                         shifts.get(toInt(r.get("shift"))).getName(),
@@ -209,6 +273,25 @@ public class ScheduleAutomationService {
     static boolean isNightShift(LocalTime start, LocalTime end) {
         boolean crossesMidnight = !end.isAfter(start);
         return crossesMidnight || end.isAfter(NIGHT_START) || start.isBefore(NIGHT_END);
+    }
+
+    /**
+     * 교대 시간이 가용 시간 안에 완전히 들어가는지 확인한다.
+     * 자정을 넘기는 교대는 가용 시간이 그날 끝(23:59)까지일 때만 가능한 것으로 본다.
+     */
+    static boolean fitsAvailability(LocalTime shiftStart, LocalTime shiftEnd,
+                                    LocalTime availableFrom, LocalTime availableTo) {
+        if (shiftStart.isBefore(availableFrom)) {
+            return false;
+        }
+        boolean crossesMidnight = !shiftEnd.isAfter(shiftStart);
+        return crossesMidnight
+                ? !availableTo.isBefore(END_OF_DAY)
+                : !shiftEnd.isAfter(availableTo);
+    }
+
+    private boolean isShiftOpenOn(Shift shift, int dayIndex) {
+        return shift.getDayOfWeek() == null || shift.getDayOfWeek().getValue() - 1 == dayIndex;
     }
 
     private int averageHourlyWage(List<Employee> employees) {

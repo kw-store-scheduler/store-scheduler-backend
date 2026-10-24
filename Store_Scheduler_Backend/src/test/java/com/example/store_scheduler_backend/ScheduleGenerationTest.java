@@ -127,6 +127,24 @@ class ScheduleGenerationTest {
     }
 
     @Test
+    void 가용_시간_밖의_교대에는_배정하지_않는다() throws Exception {
+        // 금~일에 근무 가능한 사람은 이 직원뿐이고, 가용 시간은 저녁부터.
+        // 엔진은 인건비가 싼 오픈을 선호하므로, 가용 시간이 반영되지 않으면 오픈에 배정된다.
+        Employee eveningStaff = approvedEmployee("저녁형", 10030);
+        for (DayOfWeek day : new DayOfWeek[]{DayOfWeek.FRIDAY, DayOfWeek.SATURDAY, DayOfWeek.SUNDAY}) {
+            availabilityRepository.save(new Availability(eveningStaff, day, LocalTime.of(18, 0), LocalTime.of(23, 59)));
+        }
+
+        automate(WEEK_START).andExpect(status().isOk()).andExpect(jsonPath("$.success").value(true));
+
+        List<Schedule> evening = scheduleRepository.findByStoreIdOrderByWorkDateAscStartTimeAsc(store.getId()).stream()
+                .filter(s -> s.getEmployee().getId().equals(eveningStaff.getId()))
+                .toList();
+        assertThat(evening).isNotEmpty();
+        assertThat(evening).allSatisfy(s -> assertThat(s.getStartTime()).isEqualTo(LocalTime.of(22, 0)));
+    }
+
+    @Test
     void 시작일이_월요일이_아니면_거절한다() throws Exception {
         automate(WEEK_START.plusDays(1)).andExpect(status().isBadRequest());
     }

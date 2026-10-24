@@ -38,4 +38,23 @@ class ScheduleAutomationServiceTest {
         assertThat(ScheduleAutomationService.isNightShift(LocalTime.of(18, 0), LocalTime.of(22, 0))).isFalse();
         assertThat(ScheduleAutomationService.isNightShift(LocalTime.of(6, 0), LocalTime.of(10, 0))).isFalse();
     }
+
+    @Test
+    void 교대가_가용_시간_안에_완전히_들어가야_근무_가능하다() {
+        LocalTime from = LocalTime.of(9, 0);
+        LocalTime to = LocalTime.of(18, 0);
+        assertThat(ScheduleAutomationService.fitsAvailability(LocalTime.of(9, 0), LocalTime.of(13, 0), from, to)).isTrue();
+        assertThat(ScheduleAutomationService.fitsAvailability(LocalTime.of(14, 0), LocalTime.of(18, 0), from, to)).isTrue();
+        assertThat(ScheduleAutomationService.fitsAvailability(LocalTime.of(8, 0), LocalTime.of(12, 0), from, to)).isFalse();
+        assertThat(ScheduleAutomationService.fitsAvailability(LocalTime.of(15, 0), LocalTime.of(19, 0), from, to)).isFalse();
+    }
+
+    @Test
+    void 자정을_넘기는_교대는_가용_시간이_그날_끝까지일_때만_가능하다() {
+        LocalTime start = LocalTime.of(22, 0);
+        LocalTime end = LocalTime.of(2, 0);
+        assertThat(ScheduleAutomationService.fitsAvailability(start, end, LocalTime.of(18, 0), LocalTime.of(23, 59))).isTrue();
+        assertThat(ScheduleAutomationService.fitsAvailability(start, end, LocalTime.of(18, 0), LocalTime.of(23, 0))).isFalse();
+        assertThat(ScheduleAutomationService.fitsAvailability(start, end, LocalTime.of(23, 0), LocalTime.of(23, 59))).isFalse();
+    }
 }

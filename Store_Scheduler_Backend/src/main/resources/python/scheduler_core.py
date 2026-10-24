@@ -78,6 +78,9 @@ def solve_schedule(config: dict, max_alt_solutions: int = 3) -> dict:
               {"day": 3,  "type": "must"},    # 필수 휴무 (위반 시 고패널티)
               {"day": 10, "type": "prefer"},  # 희망 휴무 (위반 시 중간 패널티)
           ]
+          "unavailable_slots": [              # (백엔드 추가) 특정 요일의 특정 교대 근무 불가 (하드 제약)
+              {"day": 0, "shift": 2},         # 예: 월요일은 가용 시간이 오전까지라 저녁 교대 불가
+          ]
 
     Returns
     -------
@@ -141,6 +144,14 @@ def solve_schedule(config: dict, max_alt_solutions: int = 3) -> dict:
             if d not in avail:
                 for s in range(S):
                     model.Add(work[e, d, s] == 0)
+
+    # ── [하드 1-1] 요일별 가용 시간 외 교대 근무 불가 (백엔드 추가) ─
+    # available_days는 요일 단위라, 가용 시간이 09~13시인 직원도 그날 저녁 교대에 배정될 수 있었다.
+    # 백엔드가 직원의 요일별 가용 시간과 교대 시간을 비교해 불가능한 (요일, 교대)를 넘겨준다.
+    for e, emp in enumerate(employees):
+        for slot in emp.get("unavailable_slots", []):
+            if slot["day"] < D and slot["shift"] < S:
+                model.Add(work[e, slot["day"], slot["shift"]] == 0)
 
     # ── [하드 2] 하루 최대 1교대 (이중 근무 금지) ─
     for e in range(E):
