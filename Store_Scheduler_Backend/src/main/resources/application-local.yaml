@@ -1,0 +1,10 @@
+# 로컬 개발 전용 설정 (docker-compose.yml의 PostgreSQL 기준)
+# ./gradlew bootRun 실행 시 local 프로파일이 자동으로 활성화된다. 배포 환경에서는 사용하지 않는다.
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/scheduler_db
+    username: scheduler
+    password: scheduler
+
+jwt:
+  secret: local-dev-only-secret-do-not-use-in-prod-0123456789
