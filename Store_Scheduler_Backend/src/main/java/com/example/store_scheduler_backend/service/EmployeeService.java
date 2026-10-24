@@ -81,12 +81,14 @@ public class EmployeeService {
         return employeeRepository.findByStoreIdAndStatus(storeId, EmployeeStatus.APPROVED);
     }
 
-    public List<Employee> findPendingByStore(Long storeId) {
-        return employeeRepository.findByStoreIdAndStatus(storeId, EmployeeStatus.PENDING);
+    public List<Employee> findApprovedByStore(Long storeId, String managerUsername) {
+        storeAccessGuard.verifyOwner(storeId, managerUsername);
+        return findApprovedByStore(storeId);
     }
 
-    public List<Employee> findEmployees() {
-        return employeeRepository.findAll();
+    public List<Employee> findPendingByStore(Long storeId, String managerUsername) {
+        storeAccessGuard.verifyOwner(storeId, managerUsername);
+        return employeeRepository.findByStoreIdAndStatus(storeId, EmployeeStatus.PENDING);
     }
 
     @Transactional

@@ -70,7 +70,7 @@ public class AvailabilityController {
     public ResponseEntity<List<AvailabilityResponse>> getByStore(
             @PathVariable Long storeId,
             @AuthenticationPrincipal UserDetails userDetails) {
-        List<AvailabilityResponse> result = availabilityService.findByStore(storeId)
+        List<AvailabilityResponse> result = availabilityService.findByStore(storeId, userDetails.getUsername())
                 .stream().map(AvailabilityResponse::from).collect(Collectors.toList());
         return ResponseEntity.ok(result);
     }

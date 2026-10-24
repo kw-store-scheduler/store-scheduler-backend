@@ -33,8 +33,10 @@ public class SkillController {
 
     // 매장 스킬 목록 조회
     @GetMapping("/api/stores/{storeId}/skills")
-    public ResponseEntity<List<SkillResponse>> getSkills(@PathVariable Long storeId) {
-        List<SkillResponse> result = skillService.findByStore(storeId).stream()
+    public ResponseEntity<List<SkillResponse>> getSkills(
+            @PathVariable Long storeId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        List<SkillResponse> result = skillService.findByStore(storeId, userDetails.getUsername()).stream()
                 .map(SkillResponse::from)
                 .collect(Collectors.toList());
         return ResponseEntity.ok(result);

@@ -44,8 +44,10 @@ public class ShiftController {
 
     // 관리자/직원: 매장 근무 시간대 조회
     @GetMapping("/api/stores/{storeId}/shifts")
-    public ResponseEntity<List<ShiftResponse>> getShifts(@PathVariable Long storeId) {
-        List<ShiftResponse> result = shiftService.findByStore(storeId).stream()
+    public ResponseEntity<List<ShiftResponse>> getShifts(
+            @PathVariable Long storeId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        List<ShiftResponse> result = shiftService.findByStore(storeId, userDetails.getUsername()).stream()
                 .map(ShiftResponse::from)
                 .collect(Collectors.toList());
         return ResponseEntity.ok(result);

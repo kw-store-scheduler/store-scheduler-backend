@@ -10,6 +10,7 @@ import com.example.store_scheduler_backend.service.EmployeeService;
 import com.example.store_scheduler_backend.service.ScheduleAutomationService;
 import com.example.store_scheduler_backend.service.ScheduleService;
 import com.example.store_scheduler_backend.service.ShiftService;
+import com.example.store_scheduler_backend.service.StoreAccessGuard;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -37,12 +38,15 @@ public class ScheduleController {
     private final ShiftService shiftService;
     private final ScheduleAutomationService automationService;
     private final ScheduleService scheduleService;
+    private final StoreAccessGuard storeAccessGuard;
 
     @Operation(summary = "스케줄 자동 생성", description = "매장의 승인된 직원과 가용 시간을 기반으로 최적 스케줄을 생성합니다.")
     @PostMapping("/automate")
     public ResponseEntity<Map<String, Object>> automateSchedule(
             @PathVariable Long storeId,
             @AuthenticationPrincipal UserDetails userDetails) {
+        storeAccessGuard.verifyOwner(storeId, userDetails.getUsername());
+
         List<Employee> employees = employeeService.findApprovedByStore(storeId);
         List<Availability> availabilities = availabilityService.findByStore(storeId);
         List<Shift> shifts = shiftService.findByStore(storeId);
@@ -104,8 +108,10 @@ public class ScheduleController {
 
     // 관리자/직원: 매장 전체 근무표 조회
     @GetMapping
-    public ResponseEntity<List<ScheduleResponseDto>> getSchedules(@PathVariable Long storeId) {
-        List<ScheduleResponseDto> result = scheduleService.findByStore(storeId).stream()
+    public ResponseEntity<List<ScheduleResponseDto>> getSchedules(
+            @PathVariable Long storeId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        List<ScheduleResponseDto> result = scheduleService.findByStore(storeId, userDetails.getUsername()).stream()
                 .map(ScheduleResponseDto::new)
                 .collect(Collectors.toList());
         return ResponseEntity.ok(result);

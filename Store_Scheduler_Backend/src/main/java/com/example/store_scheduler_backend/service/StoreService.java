@@ -33,8 +33,8 @@ public class StoreService {
         return storeRepository.save(store);
     }
 
-    public List<Store> findStores() {
-        return storeRepository.findAll();
+    public List<Store> findMyStores(String ownerUsername) {
+        return storeRepository.findByOwner_Username(ownerUsername);
     }
 
     public Store findOne(Long storeId) {

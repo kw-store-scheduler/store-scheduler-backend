@@ -22,6 +22,7 @@ public class AvailabilityService {
     private final AvailabilityRepository availabilityRepository;
     private final EmployeeRepository employeeRepository;
     private final UserRepository userRepository;
+    private final StoreAccessGuard storeAccessGuard;
 
     @Transactional
     public Availability register(Long storeId, DayOfWeek dayOfWeek, LocalTime startTime, LocalTime endTime, String username) {
@@ -55,6 +56,11 @@ public class AvailabilityService {
         return employees.stream()
                 .flatMap(e -> availabilityRepository.findByEmployeeId(e.getId()).stream())
                 .toList();
+    }
+
+    public List<Availability> findByStore(Long storeId, String managerUsername) {
+        storeAccessGuard.verifyOwner(storeId, managerUsername);
+        return findByStore(storeId);
     }
 
     public List<Availability> findByStore(Long storeId) {
