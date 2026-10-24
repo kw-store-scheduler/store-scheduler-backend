@@ -77,13 +77,9 @@ public class EmployeeService {
         );
     }
 
-    public List<Employee> findApprovedByStore(Long storeId) {
-        return employeeRepository.findByStoreIdAndStatus(storeId, EmployeeStatus.APPROVED);
-    }
-
     public List<Employee> findApprovedByStore(Long storeId, String managerUsername) {
         storeAccessGuard.verifyOwner(storeId, managerUsername);
-        return findApprovedByStore(storeId);
+        return employeeRepository.findByStoreIdAndStatus(storeId, EmployeeStatus.APPROVED);
     }
 
     public List<Employee> findPendingByStore(Long storeId, String managerUsername) {

@@ -2,7 +2,8 @@ package com.example.store_scheduler_backend.service;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.ClassPathResource;
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.stereotype.Component;
 import tools.jackson.databind.ObjectMapper;
 
@@ -22,7 +23,8 @@ import java.util.concurrent.TimeUnit;
  *
  * 기존에는 "src/main/resources/python/..." 상대경로를 그대로 실행해서
  * 프로젝트 루트에서 bootRun 할 때만 동작하고 jar 배포 시에는 스크립트를 찾지 못했다.
- * 클래스패스의 스크립트를 기동 시점에 임시 파일로 꺼내 두고 그 경로로 실행한다.
+ * 클래스패스의 엔진 디렉토리(python/*.py)를 기동 시점에 임시 디렉토리로 꺼내 두고,
+ * 진입 스크립트를 그 경로로 실행한다. (진입 스크립트가 같은 디렉토리의 엔진 모듈을 import)
  *
  * 입출력 규약: stdin으로 config JSON을 받고, stdout으로 결과 JSON 한 개를 출력한다.
  * stderr는 결과 파싱을 방해하지 않도록 따로 모아 로그와 오류 메시지에만 사용한다.
@@ -37,13 +39,14 @@ public class PythonEngineRunner {
     private final Path scriptPath;
 
     public PythonEngineRunner(ObjectMapper objectMapper,
-                              @Value("${scheduler.engine.script:python/scheduler_core_0527.py}") String scriptResource,
+                              @Value("${scheduler.engine.script-dir:python}") String scriptDir,
+                              @Value("${scheduler.engine.entry:run_engine.py}") String entryScript,
                               @Value("${scheduler.engine.python-command:python3}") String pythonCommand,
                               @Value("${scheduler.engine.timeout-seconds:60}") long timeoutSeconds) {
         this.objectMapper = objectMapper;
         this.pythonCommand = pythonCommand;
         this.timeoutSeconds = timeoutSeconds;
-        this.scriptPath = extractScript(scriptResource);
+        this.scriptPath = extractScripts(scriptDir, entryScript);
     }
 
     @SuppressWarnings("unchecked")
@@ -105,17 +108,26 @@ public class PythonEngineRunner {
         });
     }
 
-    private static Path extractScript(String scriptResource) {
-        ClassPathResource resource = new ClassPathResource(scriptResource);
-        try (InputStream in = resource.getInputStream()) {
+    private static Path extractScripts(String scriptDir, String entryScript) {
+        try {
+            Resource[] resources = new PathMatchingResourcePatternResolver()
+                    .getResources("classpath:" + scriptDir + "/*.py");
             Path dir = Files.createTempDirectory("scheduler-engine");
-            Path target = dir.resolve(Path.of(scriptResource).getFileName().toString());
-            Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
-            target.toFile().deleteOnExit();
             dir.toFile().deleteOnExit();
-            return target;
+            for (Resource resource : resources) {
+                Path target = dir.resolve(resource.getFilename());
+                try (InputStream in = resource.getInputStream()) {
+                    Files.copy(in, target, StandardCopyOption.REPLACE_EXISTING);
+                }
+                target.toFile().deleteOnExit();
+            }
+            Path entry = dir.resolve(entryScript);
+            if (!Files.exists(entry)) {
+                throw new IllegalStateException("클래스패스에서 파이썬 엔진 스크립트를 찾을 수 없습니다: " + scriptDir + "/" + entryScript);
+            }
+            return entry;
         } catch (IOException e) {
-            throw new IllegalStateException("클래스패스에서 파이썬 엔진 스크립트를 찾을 수 없습니다: " + scriptResource, e);
+            throw new IllegalStateException("파이썬 엔진 스크립트를 준비하지 못했습니다: " + scriptDir, e);
         }
     }
 }

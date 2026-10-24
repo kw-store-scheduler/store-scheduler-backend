@@ -11,4 +11,5 @@ public interface ScheduleRepository extends JpaRepository<Schedule, Long> {
     List<Schedule> findByStoreIdOrderByWorkDateAscStartTimeAsc(Long storeId);
     List<Schedule> findByStoreIdAndEmployeeIdOrderByWorkDateAscStartTimeAsc(Long storeId, Long employeeId);
     List<Schedule> findByEmployeeIdAndWorkDateBetweenOrderByWorkDateAsc(Long employeeId, LocalDate start, LocalDate end);
+    void deleteByStoreIdAndWorkDateBetween(Long storeId, LocalDate start, LocalDate end);
 }

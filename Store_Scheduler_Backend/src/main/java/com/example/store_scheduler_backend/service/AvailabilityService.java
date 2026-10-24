@@ -60,16 +60,7 @@ public class AvailabilityService {
 
     public List<Availability> findByStore(Long storeId, String managerUsername) {
         storeAccessGuard.verifyOwner(storeId, managerUsername);
-        return findByStore(storeId);
-    }
-
-    public List<Availability> findByStore(Long storeId) {
         return availabilityRepository.findByEmployee_StoreId(storeId);
-    }
-
-    // ScheduleAutomationService에서 사용
-    public List<Availability> findAvailabilities() {
-        return availabilityRepository.findAll();
     }
 
     @Transactional
