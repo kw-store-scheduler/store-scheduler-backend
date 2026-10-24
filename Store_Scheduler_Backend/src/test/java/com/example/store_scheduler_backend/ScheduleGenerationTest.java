@@ -23,6 +23,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.ObjectMapper;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
@@ -31,10 +32,10 @@ import java.util.List;
 import java.util.Set;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.hamcrest.Matchers.greaterThan;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.empty;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -58,6 +59,7 @@ class ScheduleGenerationTest {
     @Autowired AvailabilityRepository availabilityRepository;
     @Autowired ShiftRepository shiftRepository;
     @Autowired ScheduleRepository scheduleRepository;
+    @Autowired ObjectMapper objectMapper;
 
     private Store store;
     private Employee weekdayStaff;
@@ -88,13 +90,25 @@ class ScheduleGenerationTest {
     }
 
     @Test
-    void 근무표를_생성해_저장하고_가용_요일과_승인_직원만_배정한다() throws Exception {
+    void 후보안을_생성만_하면_근무표는_바뀌지_않는다() throws Exception {
         automate(WEEK_START)
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.success").value(true))
-                .andExpect(jsonPath("$.savedCount").value(greaterThan(0)))
+                .andExpect(jsonPath("$.proposalStatus").value("PENDING"))
+                .andExpect(jsonPath("$.candidates").value(not(empty())))
+                .andExpect(jsonPath("$.candidates[0].assignments").value(not(empty())))
                 // 금~일은 가용 직원이 없으므로 최소 인원 미달이 보고되어야 한다
                 .andExpect(jsonPath("$.shortages").value(not(empty())));
+
+        assertThat(scheduleRepository.findByStoreIdOrderByWorkDateAscStartTimeAsc(store.getId())).isEmpty();
+    }
+
+    @Test
+    void 확정하면_근무표를_저장하고_가용_요일과_승인_직원만_배정한다() throws Exception {
+        generateAndConfirm(WEEK_START)
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.proposalStatus").value("CONFIRMED"))
+                .andExpect(jsonPath("$.confirmedIndex").value(0));
 
         List<Schedule> saved = scheduleRepository.findByStoreIdOrderByWorkDateAscStartTimeAsc(store.getId());
         assertThat(saved).isNotEmpty();
@@ -118,9 +132,9 @@ class ScheduleGenerationTest {
         nextWeek.setEndTime(LocalTime.of(13, 0));
         scheduleRepository.save(nextWeek);
 
-        automate(WEEK_START).andExpect(status().isOk());
+        generateAndConfirm(WEEK_START).andExpect(status().isOk());
         int firstCount = countInWeek();
-        automate(WEEK_START).andExpect(status().isOk());
+        generateAndConfirm(WEEK_START).andExpect(status().isOk());
 
         assertThat(countInWeek()).isEqualTo(firstCount);
         assertThat(scheduleRepository.findById(nextWeek.getId())).isPresent();
@@ -135,7 +149,7 @@ class ScheduleGenerationTest {
             availabilityRepository.save(new Availability(eveningStaff, day, LocalTime.of(18, 0), LocalTime.of(23, 59)));
         }
 
-        automate(WEEK_START).andExpect(status().isOk()).andExpect(jsonPath("$.success").value(true));
+        generateAndConfirm(WEEK_START).andExpect(status().isOk());
 
         List<Schedule> evening = scheduleRepository.findByStoreIdOrderByWorkDateAscStartTimeAsc(store.getId()).stream()
                 .filter(s -> s.getEmployee().getId().equals(eveningStaff.getId()))
@@ -147,6 +161,51 @@ class ScheduleGenerationTest {
     @Test
     void 시작일이_월요일이_아니면_거절한다() throws Exception {
         automate(WEEK_START.plusDays(1)).andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void 이미_확정한_후보안은_다시_확정할_수_없다() throws Exception {
+        long proposalId = createProposal(WEEK_START);
+        confirm(proposalId, 0).andExpect(status().isOk());
+        confirm(proposalId, 0).andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void 존재하지_않는_후보안_번호는_거절한다() throws Exception {
+        long proposalId = createProposal(WEEK_START);
+        confirm(proposalId, 99).andExpect(status().isBadRequest());
+        assertThat(scheduleRepository.findByStoreIdOrderByWorkDateAscStartTimeAsc(store.getId())).isEmpty();
+    }
+
+    @Test
+    void 다른_매장_관리자는_후보안을_조회하거나_확정할_수_없다() throws Exception {
+        long proposalId = createProposal(WEEK_START);
+        userRepository.save(new User("otherOwner", "pw", Role.MANAGER));
+        String otherToken = "Bearer " + jwtTokenProvider.createToken("otherOwner", "MANAGER");
+
+        mockMvc.perform(get("/api/stores/{storeId}/schedules/proposals/{id}", store.getId(), proposalId)
+                        .header("Authorization", otherToken))
+                .andExpect(status().isForbidden());
+        mockMvc.perform(post("/api/stores/{storeId}/schedules/proposals/{id}/confirm", store.getId(), proposalId)
+                        .header("Authorization", otherToken)
+                        .contentType("application/json").content("{\"candidateIndex\":0}"))
+                .andExpect(status().isForbidden());
+    }
+
+    private long createProposal(LocalDate weekStart) throws Exception {
+        String body = automate(weekStart).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        return objectMapper.readTree(body).get("proposalId").asLong();
+    }
+
+    private ResultActions confirm(long proposalId, int candidateIndex) throws Exception {
+        return mockMvc.perform(post("/api/stores/{storeId}/schedules/proposals/{id}/confirm", store.getId(), proposalId)
+                .header("Authorization", "Bearer " + jwtTokenProvider.createToken("owner", "MANAGER"))
+                .contentType("application/json")
+                .content("{\"candidateIndex\":" + candidateIndex + "}"));
+    }
+
+    private ResultActions generateAndConfirm(LocalDate weekStart) throws Exception {
+        return confirm(createProposal(weekStart), 0);
     }
 
     private ResultActions automate(LocalDate weekStart) throws Exception {
