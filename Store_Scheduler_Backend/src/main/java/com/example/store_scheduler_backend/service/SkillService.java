@@ -29,7 +29,8 @@ public class SkillService {
         return skillRepository.save(new Skill(name, store));
     }
 
-    public List<Skill> findByStore(Long storeId) {
+    public List<Skill> findByStore(Long storeId, String username) {
+        storeAccessGuard.verifyMember(storeId, username);
         return skillRepository.findByStoreId(storeId);
     }
 

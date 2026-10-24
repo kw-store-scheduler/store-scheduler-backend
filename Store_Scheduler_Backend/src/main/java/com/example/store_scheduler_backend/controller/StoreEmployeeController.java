@@ -39,7 +39,7 @@ public class StoreEmployeeController {
     public ResponseEntity<List<EmployeeResponse>> getPendingEmployees(
             @PathVariable Long storeId,
             @AuthenticationPrincipal UserDetails userDetails) {
-        List<EmployeeResponse> result = employeeService.findPendingByStore(storeId).stream()
+        List<EmployeeResponse> result = employeeService.findPendingByStore(storeId, userDetails.getUsername()).stream()
                 .map(EmployeeResponse::from)
                 .collect(Collectors.toList());
         return ResponseEntity.ok(result);
@@ -50,7 +50,7 @@ public class StoreEmployeeController {
     public ResponseEntity<List<EmployeeResponse>> getApprovedEmployees(
             @PathVariable Long storeId,
             @AuthenticationPrincipal UserDetails userDetails) {
-        List<EmployeeResponse> result = employeeService.findApprovedByStore(storeId).stream()
+        List<EmployeeResponse> result = employeeService.findApprovedByStore(storeId, userDetails.getUsername()).stream()
                 .map(EmployeeResponse::from)
                 .collect(Collectors.toList());
         return ResponseEntity.ok(result);

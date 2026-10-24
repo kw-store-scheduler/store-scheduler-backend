@@ -25,7 +25,8 @@ public class ScheduleService {
     private final UserRepository userRepository;
     private final StoreAccessGuard storeAccessGuard;
 
-    public List<Schedule> findByStore(Long storeId) {
+    public List<Schedule> findByStore(Long storeId, String username) {
+        storeAccessGuard.verifyMember(storeId, username);
         return scheduleRepository.findByStoreIdOrderByWorkDateAscStartTimeAsc(storeId);
     }
 

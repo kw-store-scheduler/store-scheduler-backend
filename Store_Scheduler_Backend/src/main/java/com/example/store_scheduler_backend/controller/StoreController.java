@@ -38,9 +38,10 @@ public class StoreController {
         return ResponseEntity.ok(new StoreCreateResponse(storeId, newCode));
     }
 
+    // 관리자: 본인이 소유한 매장 목록 조회
     @GetMapping
-    public ResponseEntity<List<StoreResponse>> getAllStores() {
-        List<StoreResponse> result = storeService.findStores().stream()
+    public ResponseEntity<List<StoreResponse>> getMyStores(@AuthenticationPrincipal UserDetails userDetails) {
+        List<StoreResponse> result = storeService.findMyStores(userDetails.getUsername()).stream()
                 .map(s -> new StoreResponse(s.getId(), s.getName(), s.getAddress(), s.getStoreCode()))
                 .collect(Collectors.toList());
         return ResponseEntity.ok(result);

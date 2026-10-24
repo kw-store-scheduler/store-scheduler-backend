@@ -33,6 +33,11 @@ public class ShiftService {
         return shiftRepository.save(shift);
     }
 
+    public List<Shift> findByStore(Long storeId, String username) {
+        storeAccessGuard.verifyMember(storeId, username);
+        return findByStore(storeId);
+    }
+
     public List<Shift> findByStore(Long storeId) {
         return shiftRepository.findByStoreId(storeId);
     }
