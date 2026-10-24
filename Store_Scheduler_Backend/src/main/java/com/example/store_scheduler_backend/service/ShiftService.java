@@ -35,15 +35,6 @@ public class ShiftService {
 
     public List<Shift> findByStore(Long storeId, String username) {
         storeAccessGuard.verifyMember(storeId, username);
-        return findByStore(storeId);
-    }
-
-    public List<Shift> findByStore(Long storeId) {
         return shiftRepository.findByStoreId(storeId);
-    }
-
-    // ScheduleController 내부에서 사용
-    public List<Shift> findShifts() {
-        return shiftRepository.findAll();
     }
 }
