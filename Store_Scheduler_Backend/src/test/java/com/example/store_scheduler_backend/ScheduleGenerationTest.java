@@ -1,6 +1,8 @@
 package com.example.store_scheduler_backend;
 
 import com.example.store_scheduler_backend.domain.Availability;
+import com.example.store_scheduler_backend.domain.DayOffRequest;
+import com.example.store_scheduler_backend.domain.DayOffType;
 import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.Role;
 import com.example.store_scheduler_backend.domain.Schedule;
@@ -10,6 +12,7 @@ import com.example.store_scheduler_backend.domain.Skill;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.domain.User;
 import com.example.store_scheduler_backend.repository.AvailabilityRepository;
+import com.example.store_scheduler_backend.repository.DayOffRequestRepository;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
 import com.example.store_scheduler_backend.repository.ScheduleRepository;
 import com.example.store_scheduler_backend.repository.ShiftRepository;
@@ -65,6 +68,7 @@ class ScheduleGenerationTest {
     @Autowired ScheduleRepository scheduleRepository;
     @Autowired ObjectMapper objectMapper;
     @Autowired SkillRepository skillRepository;
+    @Autowired DayOffRequestRepository dayOffRequestRepository;
     @Autowired ShiftSkillRequirementRepository requirementRepository;
 
     private Store store;
@@ -190,6 +194,37 @@ class ScheduleGenerationTest {
             }
         });
         assertThat(skillShortageDates).contains(WEEK_START.toString(), WEEK_START.plusDays(1).toString());
+    }
+
+    @Test
+    void 대신할_사람이_있으면_필수_휴무를_신청한_날에는_배정하지_않는다() throws Exception {
+        // 화요일 오픈·마감을 맡을 수 있는 직원 2명을 추가 → 월화수 직원의 화요일 필수 휴무를 지킬 수 있다
+        for (String name : List.of("화요일1", "화요일2")) {
+            available(approvedEmployee(name, 10030), DayOfWeek.TUESDAY);
+        }
+        dayOffRequestRepository.save(new DayOffRequest(weekdayStaff, WEEK_START.plusDays(1), DayOffType.MUST, "병원"));
+
+        String body = automate(WEEK_START).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertThat(objectMapper.readTree(body).get("candidates").get(0).get("dayOffViolations").size()).isZero();
+        confirm(objectMapper.readTree(body).get("proposalId").asLong(), 0).andExpect(status().isOk());
+
+        assertThat(daysOf(scheduleRepository.findByStoreIdOrderByWorkDateAscStartTimeAsc(store.getId()), weekdayStaff))
+                .isNotEmpty()
+                .doesNotContain(DayOfWeek.TUESDAY);
+    }
+
+    @Test
+    void 대신할_사람이_없어_필수_휴무일에_배정되면_후보안에_위반으로_표시한다() throws Exception {
+        // 엔진 우선순위: 최소 인원(5천만) > 필수 휴무(1천만). 화요일 가능자가 이 직원뿐이면 배정되고 위반으로 보고된다
+        dayOffRequestRepository.save(new DayOffRequest(weekdayStaff, WEEK_START.plusDays(1), DayOffType.MUST, "병원"));
+
+        String body = automate(WEEK_START).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+
+        var violations = objectMapper.readTree(body).get("candidates").get(0).get("dayOffViolations");
+        assertThat(violations.size()).isEqualTo(1);
+        assertThat(violations.get(0).get("employeeName").asText()).isEqualTo("월화수");
+        assertThat(violations.get(0).get("date").asText()).isEqualTo(WEEK_START.plusDays(1).toString());
+        assertThat(violations.get(0).get("type").asText()).isEqualTo("MUST");
     }
 
     @Test

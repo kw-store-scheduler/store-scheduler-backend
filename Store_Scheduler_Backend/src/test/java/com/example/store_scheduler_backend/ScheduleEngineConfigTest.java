@@ -1,6 +1,8 @@
 package com.example.store_scheduler_backend;
 
 import com.example.store_scheduler_backend.domain.Availability;
+import com.example.store_scheduler_backend.domain.DayOffRequest;
+import com.example.store_scheduler_backend.domain.DayOffType;
 import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.Role;
 import com.example.store_scheduler_backend.domain.Schedule;
@@ -12,6 +14,7 @@ import com.example.store_scheduler_backend.domain.User;
 import com.example.store_scheduler_backend.dto.ScheduleProposalResponse;
 import com.example.store_scheduler_backend.dto.ScheduleProposalResponse.Candidate;
 import com.example.store_scheduler_backend.repository.AvailabilityRepository;
+import com.example.store_scheduler_backend.repository.DayOffRequestRepository;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
 import com.example.store_scheduler_backend.repository.ScheduleRepository;
 import com.example.store_scheduler_backend.repository.ShiftRepository;
@@ -67,6 +70,7 @@ class ScheduleEngineConfigTest {
     @Autowired ShiftRepository shiftRepository;
     @Autowired ScheduleRepository scheduleRepository;
     @Autowired SkillRepository skillRepository;
+    @Autowired DayOffRequestRepository dayOffRequestRepository;
     @Autowired ShiftSkillRequirementRepository requirementRepository;
 
     private Store store;
@@ -196,6 +200,32 @@ class ScheduleEngineConfigTest {
             assertThat(s.skillName()).isEqualTo("일본어");
             assertThat(s.shiftName()).isEqualTo("오픈");
             assertThat(s.date()).isEqualTo(WEEK_START);
+        });
+    }
+
+    @Test
+    void 휴무_신청을_엔진에_넘기고_후보안마다_휴무일_배정을_표시한다() {
+        dayOffRequestRepository.save(new DayOffRequest(employee, WEEK_START, DayOffType.MUST, null));
+        dayOffRequestRepository.save(new DayOffRequest(employee, WEEK_START.plusDays(SAT), DayOffType.PREFER, null));
+        // 다음 주 신청은 이번 주 config에 들어가면 안 된다
+        dayOffRequestRepository.save(new DayOffRequest(employee, WEEK_START.plusWeeks(1), DayOffType.MUST, null));
+
+        // 엔진이 월요일(필수 휴무)에 배정한 결과를 돌려준 경우
+        when(pythonEngineRunner.run(any())).thenReturn(Map.of(
+                "status", "OPTIMAL", "cost", 0, "solve_ms", 1, "shortage_report", List.of(),
+                "schedule", List.of(assigned(employee, MON, OPEN))));
+
+        ScheduleProposalResponse response = automationService.generateProposal(store.getId(), WEEK_START, "owner");
+
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(pythonEngineRunner).run(captor.capture());
+        Map<String, Object> employeeConfig = (Map<String, Object>) ((List<?>) captor.getValue().get("employees")).get(0);
+        assertThat((List<Map<String, Object>>) employeeConfig.get("off_requests")).containsExactlyInAnyOrder(
+                Map.of("day", MON, "type", "must"),
+                Map.of("day", SAT, "type", "prefer"));
+        assertThat(response.getCandidates().get(0).dayOffViolations()).singleElement().satisfies(v -> {
+            assertThat(v.date()).isEqualTo(WEEK_START);
+            assertThat(v.type()).isEqualTo("MUST");
         });
     }
 

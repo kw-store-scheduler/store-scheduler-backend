@@ -1,10 +1,13 @@
 package com.example.store_scheduler_backend.service;
 
 import com.example.store_scheduler_backend.domain.Availability;
+import com.example.store_scheduler_backend.domain.DayOffRequest;
+import com.example.store_scheduler_backend.domain.DayOffType;
 import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.EmployeeStatus;
 import com.example.store_scheduler_backend.domain.Schedule;
 import com.example.store_scheduler_backend.repository.AvailabilityRepository;
+import com.example.store_scheduler_backend.repository.DayOffRequestRepository;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
 import com.example.store_scheduler_backend.repository.ScheduleRepository;
 import lombok.RequiredArgsConstructor;
@@ -24,7 +27,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-// 결원 근무를 대신할 수 있는 직원을 근무표 생성과 같은 규칙(가용 시간, 하루 1교대, 주 52시간, 연속 5일 금지)으로 고른다
+// 결원 근무를 대신할 수 있는 직원을 근무표 생성과 같은 규칙(휴무 신청, 가용 시간, 하루 1교대, 주 52시간, 연속 5일 금지)으로 고른다
 @Component
 @RequiredArgsConstructor
 public class SubstituteFinder {
@@ -35,8 +38,10 @@ public class SubstituteFinder {
     private final EmployeeRepository employeeRepository;
     private final AvailabilityRepository availabilityRepository;
     private final ScheduleRepository scheduleRepository;
+    private final DayOffRequestRepository dayOffRequestRepository;
 
-    public record Candidate(Employee employee, boolean eligible, int weeklyHours, List<String> reasons) {
+    // onPreferredDayOff: 희망 휴무를 신청한 날이라 가능하지만 뒤로 미룸
+    public record Candidate(Employee employee, boolean eligible, boolean onPreferredDayOff, int weeklyHours, List<String> reasons) {
     }
 
     // 가능한 직원은 이번 주 근무 시간이 적은 순 → 시급이 낮은 순, 불가능한 직원은 그 뒤에 사유와 함께
@@ -52,6 +57,9 @@ public class SubstituteFinder {
                 .filter(a -> a.getDayOfWeek() == date.getDayOfWeek())
                 .collect(Collectors.toMap(a -> a.getEmployee().getId(), a -> a));
         int shiftHours = ScheduleAutomationService.shiftHours(start, end);
+        Map<Long, DayOffType> dayOffByEmployee = dayOffRequestRepository
+                .findByEmployee_StoreIdAndDateBetweenOrderByDateAsc(storeId, date, date).stream()
+                .collect(Collectors.toMap(r -> r.getEmployee().getId(), DayOffRequest::getType));
 
         List<Candidate> candidates = new ArrayList<>();
         for (Employee employee : employeeRepository.findByStoreIdAndStatus(storeId, EmployeeStatus.APPROVED)) {
@@ -64,17 +72,27 @@ public class SubstituteFinder {
                     .mapToInt(s -> ScheduleAutomationService.shiftHours(s.getStartTime(), s.getEndTime()))
                     .sum();
 
-            Optional<String> blocker = findBlocker(availabilityByEmployee.get(employee.getId()), own, date, start, end,
-                    weeklyHours + shiftHours);
-            List<String> reasons = blocker.map(List::of).orElseGet(() -> List.of(
-                    "가용 시간 " + availabilityByEmployee.get(employee.getId()).getStartTime()
-                            + "~" + availabilityByEmployee.get(employee.getId()).getEndTime(),
-                    "이번 주 " + weeklyHours + "시간 근무 중",
-                    "시급 " + NumberFormat.getInstance(Locale.KOREA).format(wage(employee)) + "원"));
-            candidates.add(new Candidate(employee, blocker.isEmpty(), weeklyHours, reasons));
+            DayOffType dayOff = dayOffByEmployee.get(employee.getId());
+            Optional<String> blocker = dayOff == DayOffType.MUST
+                    ? Optional.of("필수 휴무 신청일")
+                    : findBlocker(availabilityByEmployee.get(employee.getId()), own, date, start, end, weeklyHours + shiftHours);
+            boolean onPreferredDayOff = dayOff == DayOffType.PREFER;
+            List<String> reasons = blocker.map(List::of).orElseGet(() -> {
+                List<String> r = new ArrayList<>();
+                if (onPreferredDayOff) {
+                    r.add("희망 휴무 신청일");
+                }
+                r.add("가용 시간 " + availabilityByEmployee.get(employee.getId()).getStartTime()
+                        + "~" + availabilityByEmployee.get(employee.getId()).getEndTime());
+                r.add("이번 주 " + weeklyHours + "시간 근무 중");
+                r.add("시급 " + NumberFormat.getInstance(Locale.KOREA).format(wage(employee)) + "원");
+                return r;
+            });
+            candidates.add(new Candidate(employee, blocker.isEmpty(), onPreferredDayOff, weeklyHours, reasons));
         }
 
         candidates.sort(Comparator.comparing((Candidate c) -> !c.eligible())
+                .thenComparing(Candidate::onPreferredDayOff)
                 .thenComparingInt(Candidate::weeklyHours)
                 .thenComparingInt(c -> wage(c.employee()))
                 .thenComparing(c -> c.employee().getName()));
