@@ -5,6 +5,8 @@ import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.Role;
 import com.example.store_scheduler_backend.domain.Schedule;
 import com.example.store_scheduler_backend.domain.Shift;
+import com.example.store_scheduler_backend.domain.ShiftSkillRequirement;
+import com.example.store_scheduler_backend.domain.Skill;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.domain.User;
 import com.example.store_scheduler_backend.dto.ScheduleProposalResponse;
@@ -13,6 +15,8 @@ import com.example.store_scheduler_backend.repository.AvailabilityRepository;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
 import com.example.store_scheduler_backend.repository.ScheduleRepository;
 import com.example.store_scheduler_backend.repository.ShiftRepository;
+import com.example.store_scheduler_backend.repository.ShiftSkillRequirementRepository;
+import com.example.store_scheduler_backend.repository.SkillRepository;
 import com.example.store_scheduler_backend.repository.StoreRepository;
 import com.example.store_scheduler_backend.repository.UserRepository;
 import com.example.store_scheduler_backend.service.PythonEngineRunner;
@@ -62,6 +66,8 @@ class ScheduleEngineConfigTest {
     @Autowired AvailabilityRepository availabilityRepository;
     @Autowired ShiftRepository shiftRepository;
     @Autowired ScheduleRepository scheduleRepository;
+    @Autowired SkillRepository skillRepository;
+    @Autowired ShiftSkillRequirementRepository requirementRepository;
 
     private Store store;
     private Employee employee;
@@ -161,6 +167,36 @@ class ScheduleEngineConfigTest {
                     assertThat(e.workDays()).isEqualTo(1);
                     assertThat(e.hours()).isEqualTo(4);
                 });
+    }
+
+    @Test
+    void 직원_스킬과_교대_필요_스킬을_id로_넘기고_역량_부족은_스킬_이름으로_돌려준다() {
+        Skill japanese = skillRepository.save(new Skill("일본어", store));
+        employee.addSkill(japanese);
+        Shift open = shiftRepository.findByStoreId(store.getId()).stream()
+                .filter(s -> s.getName().equals("오픈")).findFirst().orElseThrow();
+        requirementRepository.save(new ShiftSkillRequirement(open, japanese, 1));
+        String skillKey = "skill_" + japanese.getId();
+
+        when(pythonEngineRunner.run(any())).thenReturn(Map.of(
+                "status", "OPTIMAL", "schedule", List.of(), "cost", 0, "solve_ms", 1, "shortage_report", List.of(),
+                "skill_shortage_report", List.of(
+                        Map.of("day", MON, "shift", OPEN, "skill", skillKey, "required", 1, "actual", 0))));
+
+        ScheduleProposalResponse response = automationService.generateProposal(store.getId(), WEEK_START, "owner");
+
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(pythonEngineRunner).run(captor.capture());
+        Map<String, Object> config = captor.getValue();
+        assertThat((List<String>) ((Map<String, Object>) ((List<?>) config.get("employees")).get(0)).get("skills"))
+                .containsExactly(skillKey);
+        assertThat((List<Map<String, Object>>) config.get("skill_requirements"))
+                .containsExactly(Map.of("shift", OPEN, "skill", skillKey, "count", 1));
+        assertThat(response.getShortages()).singleElement().satisfies(s -> {
+            assertThat(s.skillName()).isEqualTo("일본어");
+            assertThat(s.shiftName()).isEqualTo("오픈");
+            assertThat(s.date()).isEqualTo(WEEK_START);
+        });
     }
 
     private Map<String, Object> assigned(Employee e, int... dayShiftPairs) {

@@ -4,6 +4,7 @@ import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.Skill;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
+import com.example.store_scheduler_backend.repository.ShiftSkillRequirementRepository;
 import com.example.store_scheduler_backend.repository.SkillRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -18,6 +19,7 @@ public class SkillService {
     private final SkillRepository skillRepository;
     private final EmployeeRepository employeeRepository;
     private final StoreAccessGuard storeAccessGuard;
+    private final ShiftSkillRequirementRepository requirementRepository;
 
     @Transactional
     public Skill createSkill(Long storeId, String name, String managerUsername) {
@@ -42,6 +44,9 @@ public class SkillService {
         if (!skill.getStore().getId().equals(storeId)) {
             throw new IllegalArgumentException("해당 매장의 스킬이 아닙니다.");
         }
+        // 직원 보유 스킬·교대 필요 스킬로 참조 중이면 외래키 때문에 삭제되지 않으므로 먼저 정리
+        employeeRepository.findBySkills_Id(skillId).forEach(e -> e.removeSkill(skill));
+        requirementRepository.deleteAll(requirementRepository.findBySkillId(skillId));
         skillRepository.delete(skill);
     }
 

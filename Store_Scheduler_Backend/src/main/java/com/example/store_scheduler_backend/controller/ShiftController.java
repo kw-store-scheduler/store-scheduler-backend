@@ -1,6 +1,7 @@
 package com.example.store_scheduler_backend.controller;
 
 import com.example.store_scheduler_backend.domain.Shift;
+import com.example.store_scheduler_backend.domain.ShiftSkillRequirement;
 import com.example.store_scheduler_backend.service.ShiftService;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
@@ -16,7 +17,9 @@ import org.springframework.web.bind.annotation.*;
 
 import java.time.DayOfWeek;
 import java.time.LocalTime;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @RestController
@@ -39,7 +42,7 @@ public class ShiftController {
                 request.getRequiredStaff(),
                 request.getDayOfWeek(),
                 userDetails.getUsername());
-        return ResponseEntity.ok(ShiftResponse.from(shift));
+        return ResponseEntity.ok(ShiftResponse.from(shift, List.of()));
     }
 
     // 관리자/직원: 매장 근무 시간대 조회
@@ -47,8 +50,34 @@ public class ShiftController {
     public ResponseEntity<List<ShiftResponse>> getShifts(
             @PathVariable Long storeId,
             @AuthenticationPrincipal UserDetails userDetails) {
+        Map<Long, List<ShiftSkillRequirement>> requirements =
+                shiftService.findSkillRequirementsByStore(storeId, userDetails.getUsername());
         List<ShiftResponse> result = shiftService.findByStore(storeId, userDetails.getUsername()).stream()
-                .map(ShiftResponse::from)
+                .map(s -> ShiftResponse.from(s, requirements.getOrDefault(s.getId(), List.of())))
+                .collect(Collectors.toList());
+        return ResponseEntity.ok(result);
+    }
+
+    // 관리자: 근무 시간대 필요 스킬 설정 (예: 오픈에 일본어 가능자 1명)
+    @PutMapping("/api/stores/{storeId}/shifts/{shiftId}/skill-requirements")
+    public ResponseEntity<List<SkillRequirementResponse>> replaceSkillRequirements(
+            @PathVariable Long storeId,
+            @PathVariable Long shiftId,
+            @RequestBody List<SkillRequirementRequest> request,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        Map<Long, Integer> countBySkillId = new LinkedHashMap<>();
+        for (SkillRequirementRequest r : request) {
+            // 목록 본문은 @Valid로 항목까지 검증되지 않아 직접 확인
+            if (r.getSkillId() == null || r.getCount() == null || r.getCount() < 1) {
+                throw new IllegalArgumentException("스킬과 1명 이상의 필요 인원을 입력해주세요.");
+            }
+            if (countBySkillId.put(r.getSkillId(), r.getCount()) != null) {
+                throw new IllegalArgumentException("같은 스킬이 중복되었습니다: " + r.getSkillId());
+            }
+        }
+        List<SkillRequirementResponse> result = shiftService.replaceSkillRequirements(
+                        storeId, shiftId, countBySkillId, userDetails.getUsername()).stream()
+                .map(SkillRequirementResponse::from)
                 .collect(Collectors.toList());
         return ResponseEntity.ok(result);
     }
@@ -80,10 +109,30 @@ public class ShiftController {
         private LocalTime endTime;
         private Integer requiredStaff;
         private DayOfWeek dayOfWeek;
+        private List<SkillRequirementResponse> skillRequirements;
 
-        static ShiftResponse from(Shift s) {
+        static ShiftResponse from(Shift s, List<ShiftSkillRequirement> requirements) {
             return new ShiftResponse(s.getId(), s.getName(), s.getStartTime(),
-                    s.getEndTime(), s.getRequiredStaff(), s.getDayOfWeek());
+                    s.getEndTime(), s.getRequiredStaff(), s.getDayOfWeek(),
+                    requirements.stream().map(SkillRequirementResponse::from).collect(Collectors.toList()));
+        }
+    }
+
+    @Data
+    static class SkillRequirementRequest {
+        private Long skillId;
+        private Integer count;
+    }
+
+    @Data
+    @AllArgsConstructor
+    static class SkillRequirementResponse {
+        private Long skillId;
+        private String skillName;
+        private int count;
+
+        static SkillRequirementResponse from(ShiftSkillRequirement r) {
+            return new SkillRequirementResponse(r.getSkill().getId(), r.getSkill().getName(), r.getRequiredCount());
         }
     }
 }

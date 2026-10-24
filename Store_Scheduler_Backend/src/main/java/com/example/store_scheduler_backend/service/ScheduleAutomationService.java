@@ -6,6 +6,7 @@ import com.example.store_scheduler_backend.domain.EmployeeStatus;
 import com.example.store_scheduler_backend.domain.Schedule;
 import com.example.store_scheduler_backend.domain.ScheduleProposal;
 import com.example.store_scheduler_backend.domain.Shift;
+import com.example.store_scheduler_backend.domain.ShiftSkillRequirement;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.dto.ScheduleProposalResponse;
 import com.example.store_scheduler_backend.dto.ScheduleProposalResponse.Assignment;
@@ -17,6 +18,7 @@ import com.example.store_scheduler_backend.repository.EmployeeRepository;
 import com.example.store_scheduler_backend.repository.ScheduleProposalRepository;
 import com.example.store_scheduler_backend.repository.ScheduleRepository;
 import com.example.store_scheduler_backend.repository.ShiftRepository;
+import com.example.store_scheduler_backend.repository.ShiftSkillRequirementRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -45,6 +47,7 @@ public class ScheduleAutomationService {
 
     private static final int DAYS_IN_WEEK = 7;
     private static final String EMPLOYEE_KEY_PREFIX = "emp_";
+    private static final String SKILL_KEY_PREFIX = "skill_";
     private static final int SOLVER_TIME_LIMIT_SECONDS = 10;
     private static final double NIGHT_BONUS_RATE = 0.5;
     private static final LocalTime NIGHT_START = LocalTime.of(22, 0);
@@ -59,6 +62,7 @@ public class ScheduleAutomationService {
     private final ShiftRepository shiftRepository;
     private final ScheduleRepository scheduleRepository;
     private final ScheduleProposalRepository proposalRepository;
+    private final ShiftSkillRequirementRepository requirementRepository;
     private final ObjectMapper objectMapper;
 
     // weekStart(월요일)부터 7일간의 근무표 후보안을 만든다. 확정 전까지 근무표는 바뀌지 않는다.
@@ -80,7 +84,8 @@ public class ScheduleAutomationService {
         List<Schedule> current = scheduleRepository.findByStoreIdAndWorkDateBetween(
                 storeId, weekStart, weekStart.plusDays(DAYS_IN_WEEK - 1));
 
-        Map<String, Object> config = buildEngineConfig(storeId, employees, shifts);
+        List<ShiftSkillRequirement> skillRequirements = requirementRepository.findByShift_Store_Id(storeId);
+        Map<String, Object> config = buildEngineConfig(storeId, employees, shifts, skillRequirements);
         config.put("prev_assignments", toPrevAssignments(current, weekStart, employees, shifts));
         Map<String, Object> result = pythonEngineRunner.run(config);
         String status = (String) result.get("status");
@@ -90,7 +95,8 @@ public class ScheduleAutomationService {
         }
 
         List<Candidate> candidates = toCandidates(result, weekStart, employees, shifts, current);
-        List<Shortage> shortages = toShortages(result.get("shortage_report"), weekStart, shifts);
+        List<Shortage> shortages = new ArrayList<>(toShortages(result.get("shortage_report"), weekStart, shifts));
+        shortages.addAll(toSkillShortages(result.get("skill_shortage_report"), weekStart, shifts, skillRequirements));
         Long solveMs = toLong(result.get("solve_ms"));
 
         ScheduleProposal proposal = proposalRepository.save(new ScheduleProposal(store, weekStart, status, solveMs,
@@ -101,7 +107,8 @@ public class ScheduleAutomationService {
                 weekStart, solveMs, proposal.getStatus(), null, shortages, candidates);
     }
 
-    private Map<String, Object> buildEngineConfig(Long storeId, List<Employee> employees, List<Shift> shifts) {
+    private Map<String, Object> buildEngineConfig(Long storeId, List<Employee> employees, List<Shift> shifts,
+                                                  List<ShiftSkillRequirement> skillRequirements) {
         Map<Long, Map<Integer, Availability>> availabilityByEmployee = availabilityRepository.findByEmployee_StoreId(storeId).stream()
                 .collect(Collectors.groupingBy(
                         a -> a.getEmployee().getId(),
@@ -121,6 +128,7 @@ public class ScheduleAutomationService {
             config.put("available_days", new ArrayList<>(availabilityByDay.keySet()));
             config.put("unavailable_slots", unavailableSlots(availabilityByDay, shifts));
             config.put("preferred_shifts", allShiftIndices);
+            config.put("skills", employee.getSkills().stream().map(sk -> SKILL_KEY_PREFIX + sk.getId()).toList());
             employeeConfigs.add(config);
         }
 
@@ -145,7 +153,21 @@ public class ScheduleAutomationService {
         config.put("night_bonus", NIGHT_BONUS_RATE);
         config.put("num_days", DAYS_IN_WEEK);
         config.put("time_limit", SOLVER_TIME_LIMIT_SECONDS);
+        config.put("skill_requirements", toEngineSkillRequirements(skillRequirements, shifts));
         return config;
+    }
+
+    // 스킬 이름은 바뀔 수 있어서 엔진에는 id로 넘긴다
+    private List<Map<String, Object>> toEngineSkillRequirements(List<ShiftSkillRequirement> skillRequirements, List<Shift> shifts) {
+        List<Map<String, Object>> requirements = new ArrayList<>();
+        for (ShiftSkillRequirement r : skillRequirements) {
+            int shiftIndex = indexOfShiftId(shifts, r.getShift().getId());
+            if (shiftIndex >= 0) {
+                requirements.add(Map.of("shift", shiftIndex, "skill", SKILL_KEY_PREFIX + r.getSkill().getId(),
+                        "count", r.getRequiredCount()));
+            }
+        }
+        return requirements;
     }
 
     // 가용 시간을 등록한 요일 중 근무할 수 없는 (요일, 교대)
@@ -274,7 +296,29 @@ public class ScheduleAutomationService {
                         weekStart.plusDays(toInt(r.get("day"))),
                         shifts.get(toInt(r.get("shift"))).getName(),
                         toInt(r.get("required")),
-                        toInt(r.get("actual"))))
+                        toInt(r.get("actual")),
+                        null))
+                .toList();
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Shortage> toSkillShortages(Object report, LocalDate weekStart, List<Shift> shifts,
+                                            List<ShiftSkillRequirement> skillRequirements) {
+        if (report == null) {
+            return List.of();
+        }
+        Map<String, String> skillNames = new HashMap<>();
+        for (ShiftSkillRequirement r : skillRequirements) {
+            skillNames.put(SKILL_KEY_PREFIX + r.getSkill().getId(), r.getSkill().getName());
+        }
+        return ((List<Map<String, Object>>) report).stream()
+                .filter(r -> isShiftOpenOn(shifts.get(toInt(r.get("shift"))), toInt(r.get("day"))))
+                .map(r -> new Shortage(
+                        weekStart.plusDays(toInt(r.get("day"))),
+                        shifts.get(toInt(r.get("shift"))).getName(),
+                        toInt(r.get("required")),
+                        toInt(r.get("actual")),
+                        skillNames.getOrDefault((String) r.get("skill"), (String) r.get("skill"))))
                 .toList();
     }
 
@@ -307,6 +351,15 @@ public class ScheduleAutomationService {
 
     private boolean isShiftOpenOn(Shift shift, int dayIndex) {
         return shift.getDayOfWeek() == null || shift.getDayOfWeek().getValue() - 1 == dayIndex;
+    }
+
+    private int indexOfShiftId(List<Shift> shifts, Long shiftId) {
+        for (int i = 0; i < shifts.size(); i++) {
+            if (shifts.get(i).getId().equals(shiftId)) {
+                return i;
+            }
+        }
+        return -1;
     }
 
     private int indexOfShift(List<Shift> shifts, LocalTime start, LocalTime end) {

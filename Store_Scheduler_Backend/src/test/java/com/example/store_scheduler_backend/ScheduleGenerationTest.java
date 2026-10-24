@@ -5,12 +5,16 @@ import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.Role;
 import com.example.store_scheduler_backend.domain.Schedule;
 import com.example.store_scheduler_backend.domain.Shift;
+import com.example.store_scheduler_backend.domain.ShiftSkillRequirement;
+import com.example.store_scheduler_backend.domain.Skill;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.domain.User;
 import com.example.store_scheduler_backend.repository.AvailabilityRepository;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
 import com.example.store_scheduler_backend.repository.ScheduleRepository;
 import com.example.store_scheduler_backend.repository.ShiftRepository;
+import com.example.store_scheduler_backend.repository.ShiftSkillRequirementRepository;
+import com.example.store_scheduler_backend.repository.SkillRepository;
 import com.example.store_scheduler_backend.repository.StoreRepository;
 import com.example.store_scheduler_backend.repository.UserRepository;
 import com.example.store_scheduler_backend.security.JwtTokenProvider;
@@ -60,6 +64,8 @@ class ScheduleGenerationTest {
     @Autowired ShiftRepository shiftRepository;
     @Autowired ScheduleRepository scheduleRepository;
     @Autowired ObjectMapper objectMapper;
+    @Autowired SkillRepository skillRepository;
+    @Autowired ShiftSkillRequirementRepository requirementRepository;
 
     private Store store;
     private Employee weekdayStaff;
@@ -156,6 +162,34 @@ class ScheduleGenerationTest {
                 .toList();
         assertThat(evening).isNotEmpty();
         assertThat(evening).allSatisfy(s -> assertThat(s.getStartTime()).isEqualTo(LocalTime.of(22, 0)));
+    }
+
+    @Test
+    void 필요_스킬이_있는_교대에는_스킬_보유자를_배정하고_못_채운_날은_보고한다() throws Exception {
+        // 수·목에 근무 가능한 "수목"만 일본어 가능. 오픈에 일본어 가능자 1명 필요
+        Skill japanese = skillRepository.save(new Skill("일본어", store));
+        midweekStaff.addSkill(japanese);
+        Shift open = shiftRepository.findByStoreId(store.getId()).stream()
+                .filter(s -> s.getName().equals("오픈")).findFirst().orElseThrow();
+        requirementRepository.save(new ShiftSkillRequirement(open, japanese, 1));
+
+        String body = automate(WEEK_START).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        confirm(objectMapper.readTree(body).get("proposalId").asLong(), 0).andExpect(status().isOk());
+
+        List<Schedule> saved = scheduleRepository.findByStoreIdOrderByWorkDateAscStartTimeAsc(store.getId());
+        for (LocalDate day : List.of(WEEK_START.plusDays(2), WEEK_START.plusDays(3))) {
+            assertThat(saved).filteredOn(s -> s.getWorkDate().equals(day) && s.getStartTime().equals(LocalTime.of(9, 0)))
+                    .extracting(s -> s.getEmployee().getId())
+                    .contains(midweekStaff.getId());
+        }
+        // 월·화 오픈은 일본어 가능자가 없어 역량 부족으로 보고된다
+        var skillShortageDates = new java.util.HashSet<String>();
+        objectMapper.readTree(body).get("shortages").forEach(s -> {
+            if (!s.get("skillName").isNull() && s.get("skillName").asText().equals("일본어")) {
+                skillShortageDates.add(s.get("date").asText());
+            }
+        });
+        assertThat(skillShortageDates).contains(WEEK_START.toString(), WEEK_START.plusDays(1).toString());
     }
 
     @Test
