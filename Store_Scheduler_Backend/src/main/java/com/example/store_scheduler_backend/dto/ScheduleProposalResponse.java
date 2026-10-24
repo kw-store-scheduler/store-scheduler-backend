@@ -53,6 +53,7 @@ public class ScheduleProposalResponse {
                              String shiftName, LocalTime startTime, LocalTime endTime) {
     }
 
-    public record Shortage(LocalDate date, String shiftName, int required, int actual) {
+    // skillName이 있으면 해당 스킬 보유자 부족, 없으면 인원 자체 부족
+    public record Shortage(LocalDate date, String shiftName, int required, int actual, String skillName) {
     }
 }
