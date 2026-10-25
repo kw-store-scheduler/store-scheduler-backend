@@ -140,12 +140,19 @@ public class EmployeeProfileService {
         return new Profile(employee, skillStates(employee), changeLogRepository.findByEmployeeIdOrderByCreatedAtDescIdDesc(employeeId));
     }
 
-    // 점주: 혼자 맡길 수 있는 일과 수습 기간. null인 항목은 바꾸지 않는다 (수습을 없애려면 clearProbation)
+    // 점주: 혼자 맡길 수 있는 일, 수습 기간, 근로계약 주 시간. null인 항목은 바꾸지 않는다 (수습을 없애려면 clearProbation)
     @Transactional
     public Profile updateProfile(Long storeId, Long employeeId, List<EmployeePermission> permissions, LocalDate probationUntil,
-                                 boolean clearProbation, String managerUsername) {
+                                 boolean clearProbation, Integer contractMin, Integer contractMax, String managerUsername) {
         storeAccessGuard.verifyOwner(storeId, managerUsername);
         Employee employee = storeEmployee(storeId, employeeId);
+        if (contractMin != null && contractMax != null) {
+            if (contractMin < 0 || contractMax < contractMin || contractMax > 52) {
+                throw new IllegalArgumentException("계약 주 근무 시간 범위를 확인해주세요.");
+            }
+            employee.updateContract(contractMin, contractMax);
+            log(employee, "근로계약 주 " + contractMin + "–" + contractMax + "시간");
+        }
         if (permissions != null) {
             List<EmployeePermission> before = employee.getPermissionList();
             employee.updatePermissions(permissions);
@@ -178,7 +185,8 @@ public class EmployeeProfileService {
                 throw new IllegalArgumentException("고정 일정의 요일과 시작·종료 시간을 확인해주세요.");
             }
             rows.add(new FixedSchedule(employee, input.dayOfWeek(), input.startTime(), input.endTime(),
-                    input.label() != null && !input.label().isBlank() ? input.label() : "고정 일정"));
+                    input.label() != null && !input.label().isBlank() ? input.label() : "고정 일정",
+                    input.category(), input.validFrom(), input.validUntil()));
         }
         fixedScheduleRepository.deleteAll(fixedScheduleRepository.findByEmployeeId(employeeId));
         fixedScheduleRepository.flush();

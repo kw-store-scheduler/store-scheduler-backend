@@ -6,6 +6,7 @@ import com.example.store_scheduler_backend.domain.EmployeePermission;
 import com.example.store_scheduler_backend.domain.EmployeeSkillLevel;
 import com.example.store_scheduler_backend.domain.EmploymentType;
 import com.example.store_scheduler_backend.domain.FixedSchedule;
+import com.example.store_scheduler_backend.domain.FixedScheduleCategory;
 import com.example.store_scheduler_backend.domain.SkillLevel;
 import com.example.store_scheduler_backend.domain.SkillWindowRequirement;
 import com.example.store_scheduler_backend.service.EmployeeProfileService;
@@ -90,7 +91,8 @@ public class EmployeeProfileController {
             @RequestBody ProfileRequest request,
             @AuthenticationPrincipal UserDetails userDetails) {
         return ResponseEntity.ok(ProfileResponse.from(profileService.updateProfile(storeId, employeeId, request.getPermissions(),
-                request.getProbationUntil(), Boolean.TRUE.equals(request.getClearProbation()), userDetails.getUsername())));
+                request.getProbationUntil(), Boolean.TRUE.equals(request.getClearProbation()),
+                request.getContractMinWeeklyHours(), request.getContractMaxWeeklyHours(), userDetails.getUsername())));
     }
 
     // 관리자: 등급 확정 (신청 승인 또는 직접 지정). NONE이면 보유 스킬에서 뺀다
@@ -126,7 +128,8 @@ public class EmployeeProfileController {
             @RequestBody List<FixedScheduleRequest> request,
             @AuthenticationPrincipal UserDetails userDetails) {
         List<PreferenceService.FixedScheduleInput> inputs = request.stream()
-                .map(r -> new PreferenceService.FixedScheduleInput(r.getDayOfWeek(), r.getStartTime(), r.getEndTime(), r.getLabel()))
+                .map(r -> new PreferenceService.FixedScheduleInput(r.getDayOfWeek(), r.getStartTime(), r.getEndTime(), r.getLabel(),
+                        r.getCategory(), r.getValidFrom(), r.getValidUntil()))
                 .toList();
         return ResponseEntity.ok(profileService.replaceFixedSchedules(storeId, employeeId, inputs, userDetails.getUsername())
                 .stream().map(FixedScheduleResponse::from).toList());
@@ -173,6 +176,9 @@ public class EmployeeProfileController {
         private List<EmployeePermission> permissions;
         private LocalDate probationUntil;
         private Boolean clearProbation;
+        // 근로계약 주 근무 시간 범위 (둘 다 보내야 바뀐다)
+        private Integer contractMinWeeklyHours;
+        private Integer contractMaxWeeklyHours;
     }
 
     @Data
@@ -181,6 +187,9 @@ public class EmployeeProfileController {
         private LocalTime startTime;
         private LocalTime endTime;
         private String label;
+        private FixedScheduleCategory category;
+        private LocalDate validFrom;
+        private LocalDate validUntil;
     }
 
     @Data
@@ -242,12 +251,14 @@ public class EmployeeProfileController {
     }
 
     record ProfileResponse(Long employeeId, String name, String displayName, EmploymentType employmentType, LocalDate startDate,
-                           Integer hourlyWage, LocalDate probationUntil, int promiseScore, List<SkillStateResponse> skills,
+                           Integer hourlyWage, Integer contractMinWeeklyHours, Integer contractMaxWeeklyHours,
+                           LocalDate probationUntil, int promiseScore, List<SkillStateResponse> skills,
                            List<PermissionResponse> permissions, List<HistoryResponse> history) {
         static ProfileResponse from(EmployeeProfileService.Profile p) {
             Employee e = p.employee();
             return new ProfileResponse(e.getId(), e.getName(), e.getDisplayName(), e.getEmploymentType(), e.getStartDate(),
-                    e.getHourlyWage(), e.getProbationUntil(), e.getPromiseScore(),
+                    e.getHourlyWage(), e.getContractMinWeeklyHours(), e.getContractMaxWeeklyHours(), e.getProbationUntil(),
+                    e.getPromiseScore(),
                     p.skills().stream().map(SkillStateResponse::from).toList(), permissionStates(e),
                     p.history().stream().map(HistoryResponse::from).toList());
         }

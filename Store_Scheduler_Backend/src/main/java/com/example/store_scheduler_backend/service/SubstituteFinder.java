@@ -5,7 +5,9 @@ import com.example.store_scheduler_backend.domain.DayOffRequest;
 import com.example.store_scheduler_backend.domain.DayOffType;
 import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.EmployeeStatus;
+import com.example.store_scheduler_backend.domain.EmploymentType;
 import com.example.store_scheduler_backend.domain.FixedSchedule;
+import com.example.store_scheduler_backend.domain.UnavailablePeriod;
 import com.example.store_scheduler_backend.domain.PreferenceLevel;
 import com.example.store_scheduler_backend.domain.Schedule;
 import com.example.store_scheduler_backend.domain.ShiftPreference;
@@ -14,6 +16,7 @@ import com.example.store_scheduler_backend.repository.AvailabilityRepository;
 import com.example.store_scheduler_backend.repository.DayOffRequestRepository;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
 import com.example.store_scheduler_backend.repository.FixedScheduleRepository;
+import com.example.store_scheduler_backend.repository.UnavailablePeriodRepository;
 import com.example.store_scheduler_backend.repository.PreferenceSubmissionRepository;
 import com.example.store_scheduler_backend.repository.ShiftPreferenceRepository;
 import com.example.store_scheduler_backend.repository.ScheduleRepository;
@@ -53,10 +56,12 @@ public class SubstituteFinder {
     private final ShiftPreferenceRepository preferenceRepository;
     private final PreferenceSubmissionRepository submissionRepository;
     private final FixedScheduleRepository fixedScheduleRepository;
+    private final UnavailablePeriodRepository periodRepository;
+    private static final LocalTime END_OF_DAY = LocalTime.of(23, 59);
 
     // 그달 희망을 제출했거나 칸을 고른 직원은 요일별 가용 시간 대신 제출한 칸으로 판단한다
     private record MonthPreferences(Set<Long> submitted, Map<Long, List<ShiftPreference>> onDate,
-                                    Map<Long, List<FixedSchedule>> fixed) {
+                                    Map<Long, List<FixedSchedule>> fixed, Map<Long, List<UnavailablePeriod>> periods) {
         boolean usesPreferences(Employee employee) {
             return submitted.contains(employee.getId());
         }
@@ -166,9 +171,11 @@ public class SubstituteFinder {
                 if (preferences.usesPreferences(employee)) {
                     r.add(preferences.slot(employee, start, end).map(ShiftPreference::getLevel).orElseThrow() == PreferenceLevel.PREFERRED
                             ? "희망 제출: 선호 칸" : "희망 제출: 가능 칸");
-                } else {
+                } else if (availabilityByEmployee.get(employee.getId()) != null) {
                     r.add("가용 시간 " + availabilityByEmployee.get(employee.getId()).getStartTime()
                             + "~" + availabilityByEmployee.get(employee.getId()).getEndTime());
+                } else {
+                    r.add("정규직 · 가능 시간 제한 없음");
                 }
                 r.add("이번 주 " + weeklyHours + "시간 근무 중");
                 r.add("시급 " + NumberFormat.getInstance(Locale.KOREA).format(wage(employee)) + "원");
@@ -237,7 +244,8 @@ public class SubstituteFinder {
     private MonthPreferences loadPreferences(Long storeId, LocalDate date) {
         YearMonth month = YearMonth.from(date);
         Set<Long> submitted = new HashSet<>();
-        submissionRepository.findByEmployee_StoreIdAndMonth(storeId, month.atDay(1))
+        submissionRepository.findByEmployee_StoreIdAndMonth(storeId, month.atDay(1)).stream()
+                .filter(s -> s.getEmployee().getEmploymentType() != EmploymentType.FULL_TIME)
                 .forEach(s -> submitted.add(s.getEmployee().getId()));
         List<ShiftPreference> monthPreferences = preferenceRepository.findByEmployee_StoreIdAndDateBetween(
                 storeId, month.atDay(1), month.atEndOfMonth());
@@ -247,7 +255,10 @@ public class SubstituteFinder {
                 .collect(Collectors.groupingBy(p -> p.getEmployee().getId()));
         Map<Long, List<FixedSchedule>> fixed = fixedScheduleRepository.findByEmployee_StoreId(storeId).stream()
                 .collect(Collectors.groupingBy(f -> f.getEmployee().getId()));
-        return new MonthPreferences(submitted, onDate, fixed);
+        Map<Long, List<UnavailablePeriod>> periods = periodRepository
+                .findByEmployee_StoreIdAndEndDateGreaterThanEqualAndStartDateLessThanEqual(storeId, date, date).stream()
+                .collect(Collectors.groupingBy(p -> p.getEmployee().getId()));
+        return new MonthPreferences(submitted, onDate, fixed, periods);
     }
 
     private Optional<String> findBlocker(Employee employee, Availability availability, MonthPreferences preferences,
@@ -257,11 +268,22 @@ public class SubstituteFinder {
             return Optional.of("미성년자 근무 제한(22시~06시, 하루 7시간 초과)");
         }
         Optional<String> fixed = preferences.fixed().getOrDefault(employee.getId(), List.of()).stream()
-                .filter(f -> f.getDayOfWeek() == date.getDayOfWeek() && f.overlaps(start, end))
+                .filter(f -> f.appliesOn(date) && f.overlaps(start, end))
                 .map(f -> "고정 일정(" + f.getLabel() + ")과 겹침")
                 .findFirst();
         if (fixed.isPresent()) {
             return fixed;
+        }
+        Optional<String> period = preferences.periods().getOrDefault(employee.getId(), List.of()).stream()
+                .filter(p -> p.covers(date))
+                .map(p -> "이번 달 예외 기간" + (p.getNote() != null ? "(" + p.getNote() + ")" : ""))
+                .findFirst();
+        if (period.isPresent()) {
+            return period;
+        }
+        // 정규직은 가능 시간을 묻지 않으므로 등록한 가용 시간이 없으면 가능으로 본다
+        if (availability == null && !preferences.usesPreferences(employee) && employee.getEmploymentType() == EmploymentType.FULL_TIME) {
+            availability = new Availability(employee, date.getDayOfWeek(), LocalTime.MIN, END_OF_DAY);
         }
         if (preferences.usesPreferences(employee)) {
             if (preferences.slot(employee, start, end).isEmpty()) {

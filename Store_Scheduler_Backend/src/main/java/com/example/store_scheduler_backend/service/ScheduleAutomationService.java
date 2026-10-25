@@ -8,6 +8,9 @@ import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.EmployeeStatus;
 import com.example.store_scheduler_backend.domain.EmploymentType;
 import com.example.store_scheduler_backend.domain.FixedSchedule;
+import com.example.store_scheduler_backend.domain.FixedScheduleCategory;
+import com.example.store_scheduler_backend.domain.ShiftAttitude;
+import com.example.store_scheduler_backend.domain.UnavailablePeriod;
 import com.example.store_scheduler_backend.domain.PreferenceLevel;
 import com.example.store_scheduler_backend.domain.PreferencePriority;
 import com.example.store_scheduler_backend.domain.PreferenceSubmission;
@@ -34,6 +37,7 @@ import com.example.store_scheduler_backend.repository.DayOffRequestRepository;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
 import com.example.store_scheduler_backend.repository.EmployeeSkillLevelRepository;
 import com.example.store_scheduler_backend.repository.SkillWindowRequirementRepository;
+import com.example.store_scheduler_backend.repository.UnavailablePeriodRepository;
 import com.example.store_scheduler_backend.repository.FixedScheduleRepository;
 import com.example.store_scheduler_backend.repository.PreferenceSubmissionRepository;
 import com.example.store_scheduler_backend.repository.ScheduleProposalRepository;
@@ -126,7 +130,8 @@ public class ScheduleAutomationService {
                                Map<Long, PreferenceSubmission> submissionByEmployee,
                                StaffingPlanService.Plan staffing,
                                Map<Long, List<EmployeeSkillLevel>> levelsByEmployee,
-                               List<SkillWindowRequirement> windows) {
+                               List<SkillWindowRequirement> windows,
+                               Map<Long, List<UnavailablePeriod>> periodsByEmployee) {
         LocalDate end() {
             return start.plusDays(numDays - 1);
         }
@@ -178,6 +183,7 @@ public class ScheduleAutomationService {
     private final StaffingPlanService staffingPlanService;
     private final EmployeeSkillLevelRepository levelRepository;
     private final SkillWindowRequirementRepository windowRepository;
+    private final UnavailablePeriodRepository periodRepository;
     private final ObjectMapper objectMapper;
     private final SubstituteFinder substituteFinder;
     private final FcmService fcmService;
@@ -261,7 +267,10 @@ public class ScheduleAutomationService {
         Map<Long, PreferenceSubmission> submissionByEmployee = new HashMap<>();
         for (YearMonth m = YearMonth.from(start); !m.isAfter(YearMonth.from(end)); m = m.plusMonths(1)) {
             for (PreferenceSubmission submission : submissionRepository.findByEmployee_StoreIdAndMonth(storeId, m.atDay(1))) {
-                preferenceEmployees.add(submission.getEmployee().getId());
+                // 정규직은 날짜×교대 칸 없이 교대 선호만 내므로 제출만으로 칸 기준 판단을 하지 않는다
+                if (submission.getEmployee().getEmploymentType() != EmploymentType.FULL_TIME) {
+                    preferenceEmployees.add(submission.getEmployee().getId());
+                }
                 if (m.equals(YearMonth.from(start))) {
                     submissionByEmployee.put(submission.getEmployee().getId(), submission);
                 }
@@ -279,7 +288,9 @@ public class ScheduleAutomationService {
                 staffingPlanService.planFor(storeId, start, end),
                 levelRepository.findByEmployee_StoreId(storeId).stream()
                         .collect(Collectors.groupingBy(l -> l.getEmployee().getId())),
-                windowRepository.findByStoreIdOrderByStartTimeAsc(storeId));
+                windowRepository.findByStoreIdOrderByStartTimeAsc(storeId),
+                periodRepository.findByEmployee_StoreIdAndEndDateGreaterThanEqualAndStartDateLessThanEqual(storeId, start, end)
+                        .stream().collect(Collectors.groupingBy(p -> p.getEmployee().getId())));
     }
 
     // 기준마다 대표 해 하나만 쓰므로 동점 대안 탐색(max_alt_solutions)은 하지 않는다
@@ -340,6 +351,13 @@ public class ScheduleAutomationService {
             if (employee.isMinor()) {
                 unavailable.addAll(minorRestrictedSlots(shifts, input.numDays()));
             }
+            long otherJobMinutes = input.fixedByEmployee().getOrDefault(employee.getId(), List.of()).stream()
+                    .filter(f -> f.getCategory() == FixedScheduleCategory.OTHER_JOB && activeDuring(f, input))
+                    .mapToLong(FixedSchedule::weeklyMinutes)
+                    .sum();
+            if (otherJobMinutes > 0) {
+                config.put("max_weekly_hours", Math.max(0, MAX_WEEKLY_HOURS - (int) Math.ceil(otherJobMinutes / 60.0)));
+            }
             config.put("available_days", new ArrayList<>(availableDays));
             config.put("unavailable_slots", new ArrayList<>(unavailable));
             config.put("skills", skillKeys(employee, input.levelsByEmployee().getOrDefault(employee.getId(), List.of())));
@@ -353,8 +371,13 @@ public class ScheduleAutomationService {
                 config.put("mentor_required_days", mentorDays);
             }
             config.put("hourly", employee.getHourlyWage() != null ? employee.getHourlyWage() : 0);
+            PreferenceSubmission submission = input.submissionByEmployee().get(employee.getId());
             if (input.monthly()) {
-                addPersonalRules(config, input.submissionByEmployee().get(employee.getId()));
+                addPersonalRules(config, submission);
+                applyContract(config, employee, submission, YearMonth.from(input.start()));
+            }
+            if (submission != null && !input.usesPreferences(employee.getId())) {
+                applyShiftAttitudes(config, submission, shifts);
             }
             employeeConfigs.add(config);
         }
@@ -414,13 +437,77 @@ public class ScheduleAutomationService {
         return config;
     }
 
+    // 근로계약 범위를 그달 근무량 기본값으로. 직원이 계약 상한을 넘겨 신청했는데 점주가 승인하지 않았으면 상한으로 자른다
+    private void applyContract(Map<String, Object> config, Employee employee, PreferenceSubmission submission, YearMonth month) {
+        Integer contractMin = PreferenceService.contractMonthly(employee.getContractMinWeeklyHours(), month);
+        Integer contractMax = PreferenceService.contractMonthly(employee.getContractMaxWeeklyHours(), month);
+        if (contractMin != null && !config.containsKey("min_total_hours")) {
+            config.put("min_total_hours", contractMin);
+        }
+        if (contractMax != null) {
+            Integer requested = (Integer) config.get("max_total_hours");
+            boolean approved = submission != null && Boolean.TRUE.equals(submission.getContractExceedApproved());
+            if (requested == null || (requested > contractMax && !approved)) {
+                config.put("max_total_hours", contractMax);
+            }
+        }
+    }
+
+    // 정규직 교대 선호: 선호 교대가 있으면 그것만, 없으면 피하고 싶은 교대를 뺀 나머지를 선호로. 피하고 싶은 교대는 따로 패널티
+    private void applyShiftAttitudes(Map<String, Object> config, PreferenceSubmission submission, List<Shift> shifts) {
+        Map<Long, ShiftAttitude> attitudes = submission.getShiftAttitudeMap();
+        if (!attitudes.isEmpty()) {
+            List<Integer> prefer = new ArrayList<>();
+            List<Integer> avoid = new ArrayList<>();
+            List<Integer> notAvoid = new ArrayList<>();
+            for (int s = 0; s < shifts.size(); s++) {
+                ShiftAttitude attitude = attitudes.getOrDefault(shifts.get(s).getId(), ShiftAttitude.NEUTRAL);
+                if (attitude == ShiftAttitude.PREFER) {
+                    prefer.add(s);
+                }
+                if (attitude == ShiftAttitude.AVOID) {
+                    avoid.add(s);
+                } else {
+                    notAvoid.add(s);
+                }
+            }
+            config.put("preferred_shifts", prefer.isEmpty() ? notAvoid : prefer);
+            if (!avoid.isEmpty()) {
+                config.put("avoid_shifts", avoid);
+            }
+        }
+        if (submission.isRestDaysTogether()) {
+            config.put("rest_days_together", true);
+        }
+    }
+
+    private static boolean activeDuring(FixedSchedule fixed, PeriodInput input) {
+        for (int day = 0; day < input.numDays(); day++) {
+            if (fixed.appliesOn(input.dateOf(day))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     // 가용 시간을 등록한 요일만 근무 가능. 그중 가용 시간 밖이거나 그 요일 전용이 아닌 교대는 불가
+    // 정규직은 가능 시간을 묻지 않으므로 등록한 가용 시간이 없으면 매일 가능으로 본다
     private List<Map<String, Integer>> unavailableByAvailability(PeriodInput input, Employee employee, Set<Integer> availableDays) {
         Map<Integer, Availability> availabilityByDay = input.availabilityByEmployee().getOrDefault(employee.getId(), Map.of());
+        boolean fullTimeWithoutAvailability = availabilityByDay.isEmpty() && employee.getEmploymentType() == EmploymentType.FULL_TIME;
         List<Map<String, Integer>> slots = new ArrayList<>();
         for (int day = 0; day < input.numDays(); day++) {
             int weekday = input.dateOf(day).getDayOfWeek().getValue() - 1;
             Availability availability = availabilityByDay.get(weekday);
+            if (fullTimeWithoutAvailability) {
+                availableDays.add(day);
+                for (int s = 0; s < input.shifts().size(); s++) {
+                    if (!isShiftOpenOn(input.shifts().get(s), weekday)) {
+                        slots.add(slot(day, s));
+                    }
+                }
+                continue;
+            }
             if (availability == null) {
                 continue;
             }
@@ -436,15 +523,17 @@ public class ScheduleAutomationService {
         return slots;
     }
 
-    // 희망 제출 뒤에 고정 일정을 바꾼 경우에도 겹치는 칸은 근무 불가로 넘긴다
+    // 희망 제출 뒤에 고정 일정을 바꾼 경우에도 겹치는 칸은 근무 불가로 넘긴다. "이번 달만 예외" 기간은 그날 전부 불가
     private List<Map<String, Integer>> fixedScheduleSlots(PeriodInput input, Employee employee, Set<Integer> availableDays) {
         List<FixedSchedule> fixed = input.fixedByEmployee().getOrDefault(employee.getId(), List.of());
+        List<UnavailablePeriod> periods = input.periodsByEmployee().getOrDefault(employee.getId(), List.of());
         List<Map<String, Integer>> slots = new ArrayList<>();
         for (int day : availableDays) {
-            DayOfWeek weekday = input.dateOf(day).getDayOfWeek();
+            LocalDate date = input.dateOf(day);
+            boolean blocked = periods.stream().anyMatch(p -> p.covers(date));
             for (int s = 0; s < input.shifts().size(); s++) {
                 Shift shift = input.shifts().get(s);
-                if (fixed.stream().anyMatch(f -> f.getDayOfWeek() == weekday && f.overlaps(shift.getStartTime(), shift.getEndTime()))) {
+                if (blocked || fixed.stream().anyMatch(f -> f.appliesOn(date) && f.overlaps(shift.getStartTime(), shift.getEndTime()))) {
                     slots.add(slot(day, s));
                 }
             }
@@ -591,10 +680,24 @@ public class ScheduleAutomationService {
     }
 
     // 희망 휴무의 대안이 "오후만 쉬기"면 오후 교대에 휴무 요청을 한 번 더 걸어, 그날 나와야 하면 오전 교대로 보낸다
+    // 정규직이 대안으로 연차를 두면 그날은 정규직 필수 휴무만큼, 반차를 두면 오후 교대만 그만큼 지킨다
     private List<Map<String, Object>> toEngineOffRequests(DayOffRequest request, PeriodInput input) {
         List<Map<String, Object>> requests = new ArrayList<>();
-        requests.add(toEngineOffRequest(request, input));
-        if (request.getType() == DayOffType.PREFER && request.getFallbackList().contains(DayOffFallback.AFTERNOON_OFF)) {
+        Map<String, Object> main = toEngineOffRequest(request, input);
+        List<DayOffFallback> fallbacks = request.getFallbackList();
+        if (request.getType() == DayOffType.PREFER && fallbacks.contains(DayOffFallback.ANNUAL_LEAVE)) {
+            main.put("weight", FULL_TIME_MUST_OFF_WEIGHT);
+        }
+        requests.add(main);
+        if (request.getType() == DayOffType.PREFER && fallbacks.contains(DayOffFallback.HALF_DAY)
+                && !fallbacks.contains(DayOffFallback.ANNUAL_LEAVE)) {
+            List<Integer> afternoon = afternoonShifts(input);
+            if (!afternoon.isEmpty()) {
+                requests.add(Map.of("day", input.dayOf(request.getDate()), "type", "must", "shifts", afternoon,
+                        "weight", FULL_TIME_MUST_OFF_WEIGHT));
+            }
+        }
+        if (request.getType() == DayOffType.PREFER && fallbacks.contains(DayOffFallback.AFTERNOON_OFF)) {
             List<Integer> afternoon = new ArrayList<>();
             for (int s = 0; s < input.shifts().size(); s++) {
                 if (!input.shifts().get(s).getStartTime().isBefore(AFTERNOON_START)) {
@@ -606,6 +709,16 @@ public class ScheduleAutomationService {
             }
         }
         return requests;
+    }
+
+    private List<Integer> afternoonShifts(PeriodInput input) {
+        List<Integer> afternoon = new ArrayList<>();
+        for (int s = 0; s < input.shifts().size(); s++) {
+            if (!input.shifts().get(s).getStartTime().isBefore(AFTERNOON_START)) {
+                afternoon.add(s);
+            }
+        }
+        return afternoon.size() < input.shifts().size() ? afternoon : List.of();
     }
 
     // 필수 휴무 보장이 켜져 있으면 그날의 모든 교대를 근무 불가(하드 제약)로도 넘긴다
