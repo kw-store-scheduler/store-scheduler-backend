@@ -225,6 +225,32 @@ class ScheduleGenerationTest {
         assertThat(violations.get(0).get("employeeName").asText()).isEqualTo("월화수");
         assertThat(violations.get(0).get("date").asText()).isEqualTo(WEEK_START.plusDays(1).toString());
         assertThat(violations.get(0).get("type").asText()).isEqualTo("MUST");
+        assertThat(reasonsOf(body, weekdayStaff, WEEK_START.plusDays(1), LocalTime.of(9, 0)))
+                .contains("필수 휴무 신청일이지만 배정됨");
+    }
+
+    @Test
+    void 근무마다_배정_사유를_붙이고_다시_생성하면_기존_근무_유지를_표시한다() throws Exception {
+        Skill japanese = skillRepository.save(new Skill("일본어", store));
+        midweekStaff.addSkill(japanese);
+        Shift open = shiftRepository.findByStoreId(store.getId()).stream()
+                .filter(s -> s.getName().equals("오픈")).findFirst().orElseThrow();
+        requirementRepository.save(new ShiftSkillRequirement(open, japanese, 1));
+
+        String first = automate(WEEK_START).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        objectMapper.readTree(first).get("candidates").get(0).get("assignments").forEach(a -> {
+            List<String> reasons = new java.util.ArrayList<>();
+            a.get("reasons").forEach(r -> reasons.add(r.asText()));
+            assertThat(reasons).contains("가용 시간 00:00~23:59").anyMatch(r -> r.startsWith("이번 주 "));
+            assertThat(reasons).doesNotContain("기존 근무표 유지");
+        });
+        assertThat(reasonsOf(first, midweekStaff, WEEK_START.plusDays(3), LocalTime.of(9, 0)))
+                .contains("필요 스킬 보유: 일본어");
+
+        confirm(objectMapper.readTree(first).get("proposalId").asLong(), 0).andExpect(status().isOk());
+        String second = automate(WEEK_START).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertThat(reasonsOf(second, midweekStaff, WEEK_START.plusDays(3), LocalTime.of(9, 0)))
+                .startsWith("기존 근무표 유지", "필요 스킬 보유: 일본어");
     }
 
     @Test
@@ -287,6 +313,18 @@ class ScheduleGenerationTest {
         return (int) scheduleRepository.findByStoreIdOrderByWorkDateAscStartTimeAsc(store.getId()).stream()
                 .filter(s -> !s.getWorkDate().isAfter(WEEK_START.plusDays(6)))
                 .count();
+    }
+
+    private List<String> reasonsOf(String body, Employee employee, LocalDate date, LocalTime start) throws Exception {
+        for (var a : objectMapper.readTree(body).get("candidates").get(0).get("assignments")) {
+            if (a.get("employeeId").asLong() == employee.getId() && a.get("workDate").asText().equals(date.toString())
+                    && LocalTime.parse(a.get("startTime").asText()).equals(start)) {
+                List<String> reasons = new java.util.ArrayList<>();
+                a.get("reasons").forEach(r -> reasons.add(r.asText()));
+                return reasons;
+            }
+        }
+        throw new AssertionError("배정 없음: " + employee.getName() + " " + date + " " + start);
     }
 
     private Set<DayOfWeek> daysOf(List<Schedule> schedules, Employee employee) {

@@ -92,7 +92,11 @@ public class ScheduleAutomationService {
         List<ShiftSkillRequirement> skillRequirements = requirementRepository.findByShift_Store_Id(storeId);
         List<DayOffRequest> dayOffs = dayOffRequestRepository.findByEmployee_StoreIdAndDateBetweenOrderByDateAsc(
                 storeId, weekStart, weekStart.plusDays(DAYS_IN_WEEK - 1));
-        Map<String, Object> config = buildEngineConfig(storeId, employees, shifts, skillRequirements);
+        Map<Long, Map<Integer, Availability>> availabilityByEmployee = availabilityRepository.findByEmployee_StoreId(storeId).stream()
+                .collect(Collectors.groupingBy(
+                        a -> a.getEmployee().getId(),
+                        Collectors.toMap(this::toDayIndex, Function.identity())));
+        Map<String, Object> config = buildEngineConfig(employees, shifts, skillRequirements, availabilityByEmployee);
         addOffRequests(config, dayOffs, weekStart);
         config.put("prev_assignments", toPrevAssignments(current, weekStart, employees, shifts));
         Map<String, Object> result = pythonEngineRunner.run(config);
@@ -102,7 +106,8 @@ public class ScheduleAutomationService {
             return ScheduleProposalResponse.failed(status, weekStart);
         }
 
-        List<Candidate> candidates = toCandidates(result, weekStart, employees, shifts, current, dayOffs);
+        AssignmentContext context = new AssignmentContext(employees, current, dayOffs, skillRequirements, availabilityByEmployee);
+        List<Candidate> candidates = toCandidates(result, weekStart, shifts, context);
         List<Shortage> shortages = new ArrayList<>(toShortages(result.get("shortage_report"), weekStart, shifts));
         shortages.addAll(toSkillShortages(result.get("skill_shortage_report"), weekStart, shifts, skillRequirements));
         Long solveMs = toLong(result.get("solve_ms"));
@@ -115,13 +120,9 @@ public class ScheduleAutomationService {
                 weekStart, solveMs, proposal.getStatus(), null, shortages, candidates);
     }
 
-    private Map<String, Object> buildEngineConfig(Long storeId, List<Employee> employees, List<Shift> shifts,
-                                                  List<ShiftSkillRequirement> skillRequirements) {
-        Map<Long, Map<Integer, Availability>> availabilityByEmployee = availabilityRepository.findByEmployee_StoreId(storeId).stream()
-                .collect(Collectors.groupingBy(
-                        a -> a.getEmployee().getId(),
-                        Collectors.toMap(this::toDayIndex, Function.identity())));
-
+    private Map<String, Object> buildEngineConfig(List<Employee> employees, List<Shift> shifts,
+                                                  List<ShiftSkillRequirement> skillRequirements,
+                                                  Map<Long, Map<Integer, Availability>> availabilityByEmployee) {
         List<Integer> allShiftIndices = new ArrayList<>();
         for (int i = 0; i < shifts.size(); i++) {
             allShiftIndices.add(i);
@@ -225,10 +226,17 @@ public class ScheduleAutomationService {
         return prev;
     }
 
+    // 배정 사유와 후보안 지표 계산에 쓰는 생성 시점의 매장 데이터
+    private record AssignmentContext(List<Employee> employees, List<Schedule> current, List<DayOffRequest> dayOffs,
+                                     List<ShiftSkillRequirement> skillRequirements,
+                                     Map<Long, Map<Integer, Availability>> availabilityByEmployee) {
+    }
+
     // 엔진의 대표 해(schedule)를 0번, 동일 비용의 대안 해(alt_schedules)를 1번부터 후보안으로 만든다
     @SuppressWarnings("unchecked")
-    private List<Candidate> toCandidates(Map<String, Object> result, LocalDate weekStart, List<Employee> employees,
-                                         List<Shift> shifts, List<Schedule> current, List<DayOffRequest> dayOffs) {
+    private List<Candidate> toCandidates(Map<String, Object> result, LocalDate weekStart, List<Shift> shifts,
+                                         AssignmentContext context) {
+        List<Employee> employees = context.employees();
         List<List<Map<String, Object>>> solutions = new ArrayList<>();
         solutions.add((List<Map<String, Object>>) result.get("schedule"));
         Object alternatives = result.get("alt_schedules");
@@ -238,16 +246,17 @@ public class ScheduleAutomationService {
 
         Map<String, Employee> employeeByKey = employees.stream()
                 .collect(Collectors.toMap(this::employeeKey, Function.identity()));
-        Set<String> currentSlots = current.stream()
+        Set<String> currentSlots = context.current().stream()
                 .map(s -> slotKey(s.getEmployee().getId(), s.getWorkDate(), s.getStartTime()))
                 .collect(Collectors.toSet());
 
         List<Candidate> candidates = new ArrayList<>();
         for (int i = 0; i < solutions.size(); i++) {
-            List<Assignment> assignments = toAssignments(solutions.get(i), weekStart, employeeByKey, shifts);
+            List<Assignment> assignments = withReasons(toAssignments(solutions.get(i), weekStart, employeeByKey, shifts),
+                    currentSlots, context);
             candidates.add(new Candidate(i, estimateCost(assignments, employees),
                     countChanges(assignments, currentSlots), summarize(assignments, employees), assignments,
-                    findDayOffViolations(assignments, dayOffs)));
+                    findDayOffViolations(assignments, context.dayOffs())));
         }
         return candidates;
     }
@@ -266,11 +275,65 @@ public class ScheduleAutomationService {
                 Shift shift = shifts.get(toInt(slot.get("shift")));
                 assignments.add(new Assignment(employee.getId(), employee.getName(),
                         weekStart.plusDays(toInt(slot.get("day"))), shift.getName(),
-                        shift.getStartTime(), shift.getEndTime()));
+                        shift.getStartTime(), shift.getEndTime(), List.of()));
             }
         }
         assignments.sort(Comparator.comparing(Assignment::workDate).thenComparing(Assignment::startTime));
         return assignments;
+    }
+
+    private List<Assignment> withReasons(List<Assignment> assignments, Set<String> currentSlots, AssignmentContext context) {
+        Map<Long, Employee> employeeById = context.employees().stream()
+                .collect(Collectors.toMap(Employee::getId, Function.identity()));
+        Map<String, DayOffType> dayOffBySlot = context.dayOffs().stream()
+                .collect(Collectors.toMap(r -> r.getEmployee().getId() + "|" + r.getDate(), DayOffRequest::getType));
+        Map<Long, Integer> hoursByEmployee = new HashMap<>();
+        for (Assignment a : assignments) {
+            hoursByEmployee.merge(a.employeeId(), shiftHours(a.startTime(), a.endTime()), Integer::sum);
+        }
+        long averageHours = Math.round(hoursByEmployee.values().stream().mapToInt(Integer::intValue).sum()
+                / (double) context.employees().size());
+
+        List<Assignment> result = new ArrayList<>();
+        for (Assignment a : assignments) {
+            Employee employee = employeeById.get(a.employeeId());
+            List<String> reasons = new ArrayList<>();
+            if (currentSlots.contains(slotKey(a.employeeId(), a.workDate(), a.startTime()))) {
+                reasons.add("기존 근무표 유지");
+            }
+            List<String> coveredSkills = requiredSkillsHeldBy(employee, a, context.skillRequirements());
+            if (!coveredSkills.isEmpty()) {
+                reasons.add("필요 스킬 보유: " + String.join(", ", coveredSkills));
+            }
+            DayOffType dayOff = dayOffBySlot.get(a.employeeId() + "|" + a.workDate());
+            if (dayOff != null) {
+                reasons.add((dayOff == DayOffType.MUST ? "필수" : "희망") + " 휴무 신청일이지만 배정됨");
+            }
+            Availability availability = context.availabilityByEmployee()
+                    .getOrDefault(a.employeeId(), Map.of())
+                    .get(a.workDate().getDayOfWeek().getValue() - 1);
+            if (availability != null) {
+                reasons.add("가용 시간 " + availability.getStartTime() + "~" + availability.getEndTime());
+            }
+            reasons.add("이번 주 " + hoursByEmployee.get(a.employeeId()) + "시간 (직원 평균 " + averageHours + "시간)");
+            result.add(new Assignment(a.employeeId(), a.employeeName(), a.workDate(), a.shiftName(),
+                    a.startTime(), a.endTime(), reasons));
+        }
+        return result;
+    }
+
+    private List<String> requiredSkillsHeldBy(Employee employee, Assignment assignment,
+                                              List<ShiftSkillRequirement> skillRequirements) {
+        int dayIndex = assignment.workDate().getDayOfWeek().getValue() - 1;
+        return skillRequirements.stream()
+                .filter(r -> r.getShift().getStartTime().equals(assignment.startTime())
+                        && r.getShift().getEndTime().equals(assignment.endTime())
+                        && isShiftOpenOn(r.getShift(), dayIndex))
+                .filter(r -> employee.getSkills().stream().anyMatch(sk -> sk.getId().equals(r.getSkill().getId())))
+                .map(r -> r.getSkill().getName())
+                .distinct()
+                .sorted()
+                .toList();
     }
 
     // 엔진 비용은 평균 시급 기준이라, 후보안 비교에는 직원별 시급으로 다시 계산한 값을 쓴다
