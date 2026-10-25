@@ -23,6 +23,10 @@ logging:
   level:
     org.hibernate.SQL: debug
 
+server:
+  # 배포 플랫폼(Render 등)이 PORT 환경변수로 포트를 지정한다
+  port: ${PORT:8080}
+
 jwt:
   # 영문/숫자/특수문자 조합 32자 이상. 기본값을 두지 않아, 지정하지 않으면 기동에 실패한다.
   secret: ${JWT_SECRET}
