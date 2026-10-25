@@ -47,7 +47,8 @@ public class OpenShiftController {
             @AuthenticationPrincipal UserDetails userDetails) {
         OpenShift openShift = openShiftService.createExtra(storeId, request.getWorkDate(), request.getStartTime(),
                 request.getEndTime(), request.getTitle(), request.getNote(),
-                request.getHeadcount() != null ? request.getHeadcount() : 1, userDetails.getUsername());
+                request.getHeadcount() != null ? request.getHeadcount() : 1, request.getRequiredSkillId(),
+                request.getApplyDeadline(), userDetails.getUsername());
         return ResponseEntity.ok(BoardItemResponse.from(new OpenShiftService.BoardItem(openShift, 0, null, null, null, null)));
     }
 
@@ -80,14 +81,14 @@ public class OpenShiftController {
         return ResponseEntity.noContent().build();
     }
 
-    // 관리자: 지원자 목록
+    @Operation(summary = "지원자 목록", description = "점주용. 이번 달 추가 근무가 적은 순으로, 이번 주 근무 시간(이 근무 포함)과 예상 수당. 상시 5인 이상이면 주 40시간 초과분은 연장근무 50% 가산")
     @GetMapping("/api/stores/{storeId}/open-shifts/{openShiftId}/applications")
-    public ResponseEntity<List<ApplicationResponse>> getApplications(
+    public ResponseEntity<List<ApplicantResponse>> getApplications(
             @PathVariable Long storeId,
             @PathVariable Long openShiftId,
             @AuthenticationPrincipal UserDetails userDetails) {
         return ResponseEntity.ok(openShiftService.findApplications(storeId, openShiftId, userDetails.getUsername()).stream()
-                .map(ApplicationResponse::from).toList());
+                .map(ApplicantResponse::from).toList());
     }
 
     @Operation(summary = "지원 승인", description = "결원이면 근무 담당자를 지원자로 바꾸고, 추가 모집이면 지원자 근무를 새로 만듭니다. 모집 인원이 차면 나머지 지원은 거절됩니다.")
@@ -114,16 +115,31 @@ public class OpenShiftController {
         private String note;
         // 생략하면 1명
         private Integer headcount;
+        // 이 역량이 있어야 지원 가능
+        private Long requiredSkillId;
+        // 생략하면 근무 시작 전까지
+        private LocalDateTime applyDeadline;
     }
 
     record BoardItemResponse(Long id, OpenShiftKind kind, Long swapRequestId, LocalDate workDate, LocalTime startTime,
-                             LocalTime endTime, String title, String note, int headcount, int applicantCount,
-                             Boolean eligible, String blocker, Long expectedPay, ApplicationStatus myStatus) {
+                             LocalTime endTime, String title, String note, int headcount, String requiredSkill,
+                             LocalDateTime applyDeadline, int applicantCount, Boolean eligible, String blocker,
+                             Long expectedPay, ApplicationStatus myStatus) {
         static BoardItemResponse from(OpenShiftService.BoardItem item) {
             OpenShift o = item.openShift();
             return new BoardItemResponse(o.getId(), o.getKind(), o.getSwapRequest() != null ? o.getSwapRequest().getId() : null,
                     o.getWorkDate(), o.getStartTime(), o.getEndTime(), o.getTitle(), o.getNote(), o.getHeadcount(),
+                    o.getRequiredSkill() != null ? o.getRequiredSkill().getName() : null, o.getApplyDeadline(),
                     item.applicantCount(), item.eligible(), item.blocker(), item.expectedPay(), item.myStatus());
+        }
+    }
+
+    record ApplicantResponse(Long id, Long employeeId, String employeeName, ApplicationStatus status, LocalDateTime appliedAt,
+                             int monthExtraCount, double weekHours, long expectedPay, boolean overtime) {
+        static ApplicantResponse from(OpenShiftService.Applicant a) {
+            ShiftApplication app = a.application();
+            return new ApplicantResponse(app.getId(), app.getEmployee().getId(), app.getEmployee().getDisplayName(),
+                    app.getStatus(), app.getAppliedAt(), a.monthExtraCount(), a.weekHours(), a.expectedPay(), a.overtime());
         }
     }
 

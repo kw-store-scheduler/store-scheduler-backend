@@ -32,6 +32,9 @@ public class Employee {
 
     private LocalDateTime requestedAt;
 
+    // 약속 점수. 개인 사정으로 빠지고 대타를 못 구하면 -1, 매달 절반씩 회복. 휴무가 겹칠 때 순서를 정하는 데만 쓴다
+    private Integer promiseScore;
+
     private Integer hourlyWage;
 
     @Enumerated(EnumType.STRING)
@@ -78,6 +81,19 @@ public class Employee {
 
     public boolean isMinor() {
         return Boolean.TRUE.equals(minor);
+    }
+
+    public int getPromiseScore() {
+        return promiseScore != null ? promiseScore : 0;
+    }
+
+    public void losePromisePoint() {
+        this.promiseScore = getPromiseScore() - 1;
+    }
+
+    // 0을 향해 절반 (-3 → -1)
+    public void recoverPromiseScore() {
+        this.promiseScore = getPromiseScore() / 2;
     }
 
     public String getDisplayName() {

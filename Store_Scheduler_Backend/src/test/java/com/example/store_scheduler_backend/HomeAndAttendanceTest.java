@@ -5,12 +5,14 @@ import com.example.store_scheduler_backend.domain.Role;
 import com.example.store_scheduler_backend.domain.Schedule;
 import com.example.store_scheduler_backend.domain.Shift;
 import com.example.store_scheduler_backend.domain.Store;
+import com.example.store_scheduler_backend.domain.SwapOffer;
 import com.example.store_scheduler_backend.domain.SwapRequest;
 import com.example.store_scheduler_backend.domain.User;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
 import com.example.store_scheduler_backend.repository.ScheduleRepository;
 import com.example.store_scheduler_backend.repository.ShiftRepository;
 import com.example.store_scheduler_backend.repository.StoreRepository;
+import com.example.store_scheduler_backend.repository.SwapOfferRepository;
 import com.example.store_scheduler_backend.repository.SwapRequestRepository;
 import com.example.store_scheduler_backend.repository.UserRepository;
 import com.example.store_scheduler_backend.security.JwtTokenProvider;
@@ -47,6 +49,7 @@ class HomeAndAttendanceTest {
     @Autowired ShiftRepository shiftRepository;
     @Autowired ScheduleRepository scheduleRepository;
     @Autowired SwapRequestRepository swapRequestRepository;
+    @Autowired SwapOfferRepository swapOfferRepository;
 
     private Store store;
     private Employee yuna;
@@ -65,9 +68,9 @@ class HomeAndAttendanceTest {
 
         schedule(yuna, TODAY, 9, 14);
         Schedule jisuOpen = schedule(jisu, TODAY, 9, 14);
-        SwapRequest request = new SwapRequest(jisuOpen, "건강 악화");
-        request.offer(yuna);
-        swapRequestRepository.save(request);
+        SwapRequest request = swapRequestRepository.save(new SwapRequest(jisuOpen, "건강 악화"));
+        request.markOffered();
+        swapOfferRepository.save(new SwapOffer(request, yuna, true));
     }
 
     @Test
@@ -79,7 +82,6 @@ class HomeAndAttendanceTest {
                 .andExpect(jsonPath("$.pendingApprovals").value(1))
                 .andExpect(jsonPath("$.activeVacancies.length()").value(1))
                 .andExpect(jsonPath("$.activeVacancies[0].requesterName").value("지수"))
-                .andExpect(jsonPath("$.activeVacancies[0].substituteName").value("유나"))
                 .andExpect(jsonPath("$.todayShifts[0].shiftName").value("오픈"))
                 .andExpect(jsonPath("$.todayShifts[0].employeeNames.length()").value(2))
                 .andExpect(jsonPath("$.todayShifts[0].shortage").value(0))

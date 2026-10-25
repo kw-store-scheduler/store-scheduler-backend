@@ -25,6 +25,7 @@ public class ScheduleService {
     private final UserRepository userRepository;
     private final StoreAccessGuard storeAccessGuard;
     private final SwapRequestService swapRequestService;
+    private final ShiftTradeService shiftTradeService;
 
     public List<Schedule> findByStore(Long storeId, String username) {
         storeAccessGuard.verifyMember(storeId, username);
@@ -62,6 +63,7 @@ public class ScheduleService {
         storeAccessGuard.verifyOwner(storeId, managerUsername);
         Schedule schedule = findSchedule(scheduleId, storeId);
         swapRequestService.detachSchedules(List.of(schedule));
+        shiftTradeService.detachSchedules(List.of(schedule.getId()));
         scheduleRepository.delete(schedule);
     }
 

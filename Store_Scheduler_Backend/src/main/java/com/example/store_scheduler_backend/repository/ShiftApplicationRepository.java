@@ -1,5 +1,6 @@
 package com.example.store_scheduler_backend.repository;
 
+import com.example.store_scheduler_backend.domain.ApplicationStatus;
 import com.example.store_scheduler_backend.domain.ShiftApplication;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
@@ -12,5 +13,6 @@ import java.util.Optional;
 public interface ShiftApplicationRepository extends JpaRepository<ShiftApplication, Long> {
     List<ShiftApplication> findByOpenShiftIdOrderByAppliedAtAsc(Long openShiftId);
     List<ShiftApplication> findByOpenShiftIdIn(Collection<Long> openShiftIds);
+    List<ShiftApplication> findByEmployeeIdAndStatus(Long employeeId, ApplicationStatus status);
     Optional<ShiftApplication> findByOpenShiftIdAndEmployeeId(Long openShiftId, Long employeeId);
 }

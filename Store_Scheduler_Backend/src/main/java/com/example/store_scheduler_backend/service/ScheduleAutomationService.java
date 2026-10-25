@@ -81,6 +81,10 @@ public class ScheduleAutomationService {
     private static final LocalTime END_OF_DAY = LocalTime.of(23, 59);
     private static final int MAX_BACKUPS = 3;
     private static final int FULL_TIME_MUST_OFF_WEIGHT = 9_000_000;
+    private static final int MUST_OFF_WEIGHT = 10_000_000;
+    private static final int PREFER_OFF_WEIGHT = 200_000;
+    // 약속 점수 1점당 휴무 패널티 차이. 휴무가 겹칠 때 점수가 낮은 사람 휴무를 먼저 깨는 정도로만 작게
+    private static final int PROMISE_POINT_WEIGHT = 1_000;
     private static final int MINOR_MAX_SHIFT_MINUTES = 7 * 60;
     private static final int MAX_WEEKLY_HOURS = 52;
     private static final int MAX_CONSECUTIVE_DAYS = 4;
@@ -549,8 +553,13 @@ public class ScheduleAutomationService {
         Map<String, Object> offRequest = new HashMap<>();
         offRequest.put("day", input.dayOf(request.getDate()));
         offRequest.put("type", request.getType() == DayOffType.MUST ? "must" : "prefer");
-        if (request.getType() == DayOffType.MUST && request.getEmployee().getEmploymentType() == EmploymentType.FULL_TIME) {
-            offRequest.put("weight", FULL_TIME_MUST_OFF_WEIGHT);
+        boolean fullTimeMust = request.getType() == DayOffType.MUST
+                && request.getEmployee().getEmploymentType() == EmploymentType.FULL_TIME;
+        int promiseScore = request.getEmployee().getPromiseScore();
+        if (fullTimeMust || promiseScore != 0) {
+            int base = fullTimeMust ? FULL_TIME_MUST_OFF_WEIGHT
+                    : request.getType() == DayOffType.MUST ? MUST_OFF_WEIGHT : PREFER_OFF_WEIGHT;
+            offRequest.put("weight", base + promiseScore * PROMISE_POINT_WEIGHT);
         }
         return offRequest;
     }

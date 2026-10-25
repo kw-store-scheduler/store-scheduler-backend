@@ -177,6 +177,28 @@ public class SubstituteFinder {
         return candidates;
     }
 
+    // 근무를 주고받는 경우처럼, removed 근무가 빠지고 added 근무가 생긴 상태를 가정해 employee가 이 근무를 할 수 있는지 본다
+    public Optional<String> blockerAfterChanges(Long storeId, Employee employee, LocalDate date, LocalTime start, LocalTime end,
+                                                List<Schedule> removed, List<WorkSlot> added) {
+        LocalDate from = date.minusDays(7);
+        LocalDate to = date.plusDays(7);
+        for (Schedule r : removed) {
+            from = r.getWorkDate().minusDays(7).isBefore(from) ? r.getWorkDate().minusDays(7) : from;
+            to = r.getWorkDate().plusDays(7).isAfter(to) ? r.getWorkDate().plusDays(7) : to;
+        }
+        Set<Long> removedIds = removed.stream().map(Schedule::getId).collect(Collectors.toSet());
+        List<WorkSlot> scenario = new ArrayList<>(added);
+        scheduleRepository.findByStoreIdAndWorkDateBetween(storeId, from, to).stream()
+                .filter(s -> !removedIds.contains(s.getId()))
+                .map(WorkSlot::of)
+                .forEach(scenario::add);
+        return rank(storeId, date, start, end, null, loadSlots(storeId, date, from, to, scenario)).stream()
+                .filter(c -> c.employee().getId().equals(employee.getId()))
+                .findFirst()
+                .map(c -> c.eligible() ? Optional.<String>empty() : Optional.of(c.reasons().get(0)))
+                .orElse(Optional.of("해당 매장의 승인된 직원이 아닙니다"));
+    }
+
     public boolean isEligible(Long storeId, LocalDate date, LocalTime start, LocalTime end, Long employeeId, Long excludeEmployeeId) {
         return find(storeId, date, start, end, excludeEmployeeId).stream()
                 .anyMatch(c -> c.employee().getId().equals(employeeId) && c.eligible());

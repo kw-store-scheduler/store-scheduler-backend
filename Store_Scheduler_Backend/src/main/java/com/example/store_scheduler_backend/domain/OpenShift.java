@@ -48,6 +48,14 @@ public class OpenShift {
     @Column(nullable = false)
     private int headcount;
 
+    // 이 역량이 있어야 지원할 수 있다
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "required_skill_id")
+    private Skill requiredSkill;
+
+    // 이 시각 이후에는 지원을 받지 않는다. null이면 근무 시작 전까지
+    private LocalDateTime applyDeadline;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private OpenShiftStatus status = OpenShiftStatus.OPEN;
@@ -58,14 +66,22 @@ public class OpenShift {
     public static OpenShift vacancy(SwapRequest request) {
         OpenShift openShift = new OpenShift(request.getStore(), OpenShiftKind.VACANCY, request.getWorkDate(),
                 request.getStartTime(), request.getEndTime(), request.getRequester().getDisplayName() + " 결원",
-                request.getReason(), 1);
+                null, 1);
         openShift.swapRequest = request;
         return openShift;
     }
 
     public static OpenShift extra(Store store, LocalDate workDate, LocalTime startTime, LocalTime endTime, String title,
-                                  String note, int headcount) {
-        return new OpenShift(store, OpenShiftKind.EXTRA, workDate, startTime, endTime, title, note, headcount);
+                                  String note, int headcount, Skill requiredSkill, LocalDateTime applyDeadline) {
+        OpenShift openShift = new OpenShift(store, OpenShiftKind.EXTRA, workDate, startTime, endTime, title, note, headcount);
+        openShift.requiredSkill = requiredSkill;
+        openShift.applyDeadline = applyDeadline;
+        return openShift;
+    }
+
+    public boolean isPastDeadline(LocalDateTime now) {
+        LocalDateTime deadline = applyDeadline != null ? applyDeadline : LocalDateTime.of(workDate, startTime);
+        return now.isAfter(deadline);
     }
 
     private OpenShift(Store store, OpenShiftKind kind, LocalDate workDate, LocalTime startTime, LocalTime endTime,
