@@ -3,6 +3,7 @@ package com.example.store_scheduler_backend.controller;
 import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.Skill;
 import com.example.store_scheduler_backend.service.EmployeeService;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -19,6 +20,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 @RestController
+@Tag(name = "직원 API", description = "매장 합류 신청·승인 및 직원 관리")
 @RequiredArgsConstructor
 public class StoreEmployeeController {
 

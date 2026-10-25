@@ -1,43 +1,143 @@
 # Store Scheduler Backend
-Spring Boot와 Python OR-Tools(CP-SAT Solver)를 결합한 교대근무 스케줄링 자동화 API 서버.
-관리자의 스케줄링 리소스 최소화 및 근무자 제약 조건을 반영한 동적 근무표 산출.
+Spring Boot와 Python OR-Tools(CP-SAT Solver)를 결합한 매장 교대근무 스케줄링 API 서버.
+직원이 가용 시간과 휴무를 입력하면 근로기준법 제약과 매장 조건(최소 인원·필요 스킬)을 반영한 주간 근무표 후보안을 만들고, 결원이 생기면 대타를 추천한다.
 
 
 
 ## Tech Stack
-- Backend: Java 17 / Spring Boot 3.x / Spring Data JPA
-- Algorithm Engine: Python 3.x / Google OR-Tools
-- Database: PostgreSQL
-- Docs & Security: Swagger (Springdoc) / Spring Security / JWT
+- Backend: Java 17 / Spring Boot 4.0.6 / Spring Data JPA / Spring Security + JWT (jjwt 0.11.5)
+- Algorithm Engine: Python 3 / Google OR-Tools (CP-SAT)
+- Database: PostgreSQL 16 (로컬은 Docker Compose), 테스트는 H2
+- Docs: Swagger UI (springdoc-openapi 3.0.3)
+- Push: Firebase Cloud Messaging (firebase-admin 9.3.0)
 
 
 ## System Architecture
-<img width="721" height="220" alt="system architecture drawio" src="https://github.com/user-attachments/assets/61548624-a9ac-45b4-909c-5b2ca6828dec" />
+```mermaid
+flowchart LR
+    Client["Client<br/>(Flutter 앱 / Swagger UI)"]
+    subgraph Server["Spring Boot"]
+        API["REST API<br/>JWT 인증 · 매장 권한 검증"]
+        Auto["ScheduleAutomationService<br/>엔진 입력 구성 · 결과 해석"]
+        Runner["PythonEngineRunner"]
+    end
+    Engine["Python Engine<br/>OR-Tools CP-SAT"]
+    DB[("PostgreSQL")]
+    FCM["Firebase Cloud Messaging"]
 
-- 이종 환경 통합: Spring Boot 내 `ProcessBuilder`를 이용한 Python 스크립트 독립 프로세스 실행.
-- Data Pipeline: PostgreSQL ↔ Spring Boot ↔ Python Engine 간 JSON 기반 직렬화/역직렬화 통신.
+    Client -->|"HTTP / JSON"| API
+    API --> Auto --> Runner
+    Runner -->|"stdin: config JSON"| Engine
+    Engine -->|"stdout: result JSON"| Runner
+    API <-->|"Spring Data JPA"| DB
+    API -->|"확정 · 대타 알림"| FCM
+    FCM -.->|push| Client
+```
+
+- Spring Boot가 DB에서 직원·교대·가용 시간·휴무·스킬을 모아 엔진 입력 JSON을 만들고, `ProcessBuilder`로 Python 엔진을 별도 프로세스로 실행한다.
+- 입력은 stdin, 결과는 stdout으로 JSON 한 개를 주고받는다. 엔진 오류는 stderr와 exit code로 받아 API 오류로 변환한다.
+- 엔진 스크립트는 클래스패스(`resources/python/`)에 포함되며, 기동 시 임시 디렉토리로 꺼내 실행하므로 jar 배포에서도 경로가 깨지지 않는다.
+- 엔진 원본은 [store-scheduler-da](https://github.com/kw-store-scheduler/store-scheduler-da)의 `scheduler_core_0527.py`이고, 백엔드의 `scheduler_core.py`는 같은 파일이다.
 
 
 
-## ERD & Directory Structure
+## Key Features
+
+1. 주간 근무표 자동 생성 (CP-SAT)
+   - 하드 제약: 가용 요일·시간 외 배정 금지, 하루 1교대, 주 52시간 이하, 연속 5일 근무 금지
+   - 계층형 패널티(소프트 제약): 최소 인원 > 필수 휴무 > 필요 스킬 > 목표 인원 > 주 15시간(주휴수당) > 기존 근무표 변경 최소화 > 희망 휴무 > 선호 교대 > 근무일수·공휴일 편차
+   - 인원·스킬 부족은 스케줄 전체를 실패시키지 않고 `shortages`로 보고
+2. 후보안 비교 후 확정
+   - 생성 단계에서는 근무표를 바꾸지 않고 후보안(최대 3개)만 저장
+   - 후보안마다 예상 인건비, 기존 근무표 대비 변경 칸 수, 직원별 근무일·시간, 휴무 위반 표시
+   - 관리자가 고른 후보안을 확정할 때만 근무표 교체 + 직원 푸시 알림
+3. 결원 · 대타
+   - 직원이 결원 요청 → 관리자에게 대타 추천 → 지정 → 대상 직원 수락/거절
+   - 추천은 근무표 생성과 같은 규칙으로 가능 여부를 판단하고, 결원으로 모자라게 된 스킬 보유자 → 희망 휴무 아님 → 이번 주 근무 시간 → 시급 순으로 정렬
+   - 불가능한 직원은 "같은 날 다른 근무가 있음", "연속 5일 근무가 됨" 등 사유 표시
+4. 직원 입력
+   - 요일별 가용 시간, 날짜별 휴무 신청(필수/희망), 스킬
+   - 교대별 필요 스킬 인원(예: 오픈에 일본어 가능자 1명), 요일 전용 교대
+5. 급여 자동 계산
+   - 월별 기본급 + 주휴수당(주 15시간 이상), 자정을 넘는 근무 처리
+6. 인증 · 권한
+   - JWT, 관리자/직원 역할 구분, 매장 소속·소유 검증(`StoreAccessGuard`)으로 다른 매장 데이터 접근 차단
 
 
-### ERD
+## ERD
 ```mermaid
 erDiagram
+    USER ||--o{ STORE : "owns"
+    USER ||--o| EMPLOYEE : "joins as"
     STORE ||--o{ EMPLOYEE : "has"
+    STORE ||--o{ SHIFT : "defines"
+    STORE ||--o{ SKILL : "defines"
     STORE ||--o{ SCHEDULE : "has"
+    STORE ||--o{ SCHEDULE_PROPOSAL : "has"
+    STORE ||--o{ SWAP_REQUEST : "has"
+    EMPLOYEE ||--o{ AVAILABILITY : "submits"
+    EMPLOYEE ||--o{ DAY_OFF_REQUEST : "submits"
+    EMPLOYEE }o--o{ SKILL : "has"
     EMPLOYEE ||--o{ SCHEDULE : "assigned to"
+    SHIFT ||--o{ SHIFT_SKILL_REQUIREMENT : "requires"
+    SKILL ||--o{ SHIFT_SKILL_REQUIREMENT : "required by"
+    SCHEDULE ||--o{ SWAP_REQUEST : "absence of"
 
+    USER {
+        Long id PK
+        String username
+        Role role "MANAGER / EMPLOYEE"
+        String deviceToken
+    }
     STORE {
         Long id PK
         String name
+        String address
+        String storeCode
+        Long owner_id FK
     }
     EMPLOYEE {
         Long id PK
         String name
-        Integer baseHourlyWage
+        String phoneNumber
+        Integer hourlyWage
+        EmployeeStatus status "PENDING / APPROVED / REJECTED"
         Long store_id FK
+        Long user_id FK
+    }
+    AVAILABILITY {
+        Long id PK
+        DayOfWeek dayOfWeek
+        LocalTime startTime
+        LocalTime endTime
+        Long employee_id FK
+    }
+    DAY_OFF_REQUEST {
+        Long id PK
+        LocalDate date
+        DayOffType type "MUST / PREFER"
+        String reason
+        Long employee_id FK
+    }
+    SHIFT {
+        Long id PK
+        String name
+        LocalTime startTime
+        LocalTime endTime
+        Integer requiredStaff
+        DayOfWeek dayOfWeek "null이면 매일"
+        Long store_id FK
+    }
+    SKILL {
+        Long id PK
+        String name
+        Long store_id FK
+    }
+    SHIFT_SKILL_REQUIREMENT {
+        Long id PK
+        int requiredCount
+        Long shift_id FK
+        Long skill_id FK
     }
     SCHEDULE {
         Long id PK
@@ -47,56 +147,219 @@ erDiagram
         Long employee_id FK
         Long store_id FK
     }
+    SCHEDULE_PROPOSAL {
+        Long id PK
+        LocalDate weekStart
+        String engineStatus
+        String candidatesJson
+        String shortagesJson
+        Integer confirmedIndex
+        Long store_id FK
+    }
+    SWAP_REQUEST {
+        Long id PK
+        LocalDate workDate
+        LocalTime startTime
+        LocalTime endTime
+        SwapStatus status
+        String reason
+        Long schedule_id FK
+        Long requester_id FK
+        Long substitute_id FK
+    }
 ```
 
 
-### Core Directory (Java & Python 통합)
+## Directory Structure
 ```text
-src/main/
- ├── java/com/example/store_scheduler_backend/
- │    ├── controller/      # Swagger 명세 및 API 엔드포인트
- │    ├── service/         # 파이썬 프로세스 호출 및 DB 영속화 로직
- │    └── security/        # JWT 토큰 발급 및 검증 로직
- └── resources/
-      ├── application.yaml # DB, JWT 설정
-      └── python/
-           └── scheduler_core_0527.py  # OR-Tools 최적화 엔진
+Store_Scheduler_Backend/
+ ├── docker-compose.yml         # 로컬 PostgreSQL
+ ├── test.http                  # 전체 API 흐름 예제 (IntelliJ HTTP Client)
+ └── src/main/
+      ├── java/com/example/store_scheduler_backend/
+      │    ├── config/          # Security, CORS, Swagger, 예외 처리
+      │    ├── controller/      # REST API
+      │    ├── domain/          # JPA 엔티티
+      │    ├── dto/
+      │    ├── repository/
+      │    ├── security/        # JWT 발급·검증 필터
+      │    └── service/
+      │         ├── ScheduleAutomationService  # 엔진 입력 구성 · 결과 해석 · 후보안 생성
+      │         ├── ScheduleProposalService    # 후보안 조회 · 확정
+      │         ├── PythonEngineRunner         # Python 프로세스 실행
+      │         ├── SubstituteFinder           # 대타 추천
+      │         ├── PayrollService             # 급여 계산
+      │         └── StoreAccessGuard           # 매장 소속 · 소유 검증
+      └── resources/
+           ├── application.yaml        # 환경변수 기반 설정
+           ├── application-local.yaml  # 로컬 개발 기본값 (bootRun 시 자동 적용)
+           └── python/
+                ├── run_engine.py      # stdin/stdout 연결 스크립트
+                └── scheduler_core.py  # CP-SAT 최적화 엔진
 ```
 
-## Key Features
 
-1. 알고리즘 기반 스케줄 최적화 (OR-Tools)
-   - `연속 근무 불가`, `일일 최대 시간 제한` 등 하드 제약조건을 만족하는 최적해 산출.
-2. 데이터 주도(Data-Driven) 동적 바인딩
-   - 하드코딩 배제. DB의 `Employee(시급, 선호 시간)` 및 `Shift(교대근무 개수)` 데이터를 Python 엔진에 동적 할당.
-3. 협업 친화적 인프라 (Swagger & CORS*
-   - 프론트엔드 연동을 위한 전역 CORS 허용 및 Swagger-UI 기반 API 명세서 제공.
+## Getting Started
+
+### 요구 사항
+- Java 17
+- Python 3 + OR-Tools: `pip install ortools`
+- Docker (로컬 PostgreSQL)
+
+### 로컬 실행
+```bash
+cd Store_Scheduler_Backend
+docker compose up -d     # PostgreSQL 16 (scheduler_db / scheduler / scheduler)
+./gradlew bootRun        # local 프로파일 자동 적용 → http://localhost:8080
+```
+- Swagger UI: http://localhost:8080/swagger-ui/index.html (우측 상단 Authorize에 로그인 토큰 입력)
+- 전체 흐름 예제: `Store_Scheduler_Backend/test.http`를 위에서부터 실행하면 회원가입 → 매장 등록 → 근무표 생성 → 대타 → 급여까지 확인할 수 있다.
+
+### 테스트
+```bash
+./gradlew test           # H2 사용, Docker 불필요. python3 + ortools가 있으면 실제 엔진 테스트도 실행
+```
+
+### 환경 변수 (local 프로파일 외 실행 시)
+| 변수 | 설명 | 기본값 |
+|---|---|---|
+| `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` | PostgreSQL 접속 정보 | 없음 (필수) |
+| `JWT_SECRET` | 32자 이상 서명 키 | 없음 (필수, 미지정 시 기동 실패) |
+| `JWT_EXPIRATION_TIME` | 토큰 만료(ms) | 3600000 |
+| `PYTHON_COMMAND` | Python 실행 명령 (가상환경 경로 등) | python3 |
+| `ENGINE_TIMEOUT_SECONDS` | 엔진 응답 대기 한도 | 60 |
+
+FCM 서비스 계정 키(`firebase-service-account.json`)가 클래스패스에 없으면 푸시 알림만 비활성화되고 나머지 기능은 정상 동작한다.
+
+
+## API Overview
+모든 API는 `Authorization: Bearer {token}` 필요 (회원가입·로그인 제외). 요청·응답 상세는 Swagger 참고.
+
+| 구분 | Method | Path | 권한 |
+|---|---|---|---|
+| 인증 | POST | `/api/auth/signup`, `/api/auth/login` | 공개 |
+| | PATCH | `/api/users/me/device-token` | 로그인 |
+| 매장 | POST, GET | `/api/stores` | 관리자 |
+| | POST | `/api/stores/{storeId}/reissue-code` | 관리자 |
+| 직원 | POST | `/api/stores/join/{storeCode}` | 직원 |
+| | GET | `/api/stores/{storeId}/employees`, `/employees/pending` | 관리자 |
+| | POST | `/api/stores/{storeId}/employees/{employeeId}/approve`, `/reject` | 관리자 |
+| | PATCH | `/api/stores/{storeId}/employees/{employeeId}` | 관리자 |
+| 스킬 | POST, GET | `/api/stores/{storeId}/skills` | 관리자 (조회는 소속 직원도) |
+| | DELETE | `/api/stores/{storeId}/skills/{skillId}` | 관리자 |
+| | POST, DELETE | `/api/stores/{storeId}/employees/{employeeId}/skills/{skillId}` | 관리자 |
+| 근무 시간대 | POST, GET | `/api/stores/{storeId}/shifts` | 관리자 (조회는 소속 직원도) |
+| | PUT | `/api/stores/{storeId}/shifts/{shiftId}/skill-requirements` | 관리자 |
+| 가용 시간 | POST | `/api/availabilities` | 직원 |
+| | GET | `/api/availabilities/my` | 직원 |
+| | PUT, DELETE | `/api/availabilities/{id}` | 직원 본인 |
+| | GET | `/api/stores/{storeId}/availabilities` | 관리자 |
+| 휴무 신청 | POST | `/api/stores/{storeId}/day-offs` | 직원 |
+| | GET | `/api/stores/{storeId}/day-offs/my` | 직원 |
+| | GET | `/api/stores/{storeId}/day-offs?from=&to=` | 관리자 |
+| | DELETE | `/api/stores/{storeId}/day-offs/{requestId}` | 신청한 직원 |
+| 근무표 | POST | `/api/stores/{storeId}/schedules/automate?weekStart=` | 관리자 |
+| | GET | `/api/stores/{storeId}/schedules/proposals/{proposalId}` | 관리자 |
+| | POST | `/api/stores/{storeId}/schedules/proposals/{proposalId}/confirm` | 관리자 |
+| | GET | `/api/stores/{storeId}/schedules`, `/schedules/my` | 소속 직원·관리자 |
+| | PUT, DELETE | `/api/stores/{storeId}/schedules/{scheduleId}` | 관리자 |
+| 결원·대타 | POST | `/api/stores/{storeId}/schedules/{scheduleId}/swap-requests` | 근무 당사자 |
+| | GET | `/api/stores/{storeId}/swap-requests` | 관리자 |
+| | GET | `/api/stores/{storeId}/swap-requests/{requestId}/candidates` | 관리자 |
+| | POST | `/api/stores/{storeId}/swap-requests/{requestId}/offer` | 관리자 |
+| | POST | `/api/stores/{storeId}/swap-requests/{requestId}/accept`, `/decline` | 지정된 직원 |
+| | POST | `/api/stores/{storeId}/swap-requests/{requestId}/cancel` | 요청한 직원 |
+| 급여 | GET | `/api/stores/{storeId}/payroll?yearMonth=` | 관리자 |
+
+### 근무표 후보안 응답 예시
+`POST /api/stores/1/schedules/automate?weekStart=2026-11-02`
+```json
+{
+  "proposalId": 1,
+  "success": true,
+  "status": "OPTIMAL",
+  "message": "근무표 후보안 1개를 생성했습니다.",
+  "weekStart": "2026-11-02",
+  "solveMs": 22,
+  "proposalStatus": "PENDING",
+  "confirmedIndex": null,
+  "shortages": [],
+  "candidates": [
+    {
+      "index": 0,
+      "estimatedCost": 90270,
+      "changedFromCurrent": 2,
+      "employees": [
+        { "employeeId": 1, "name": "김하나", "workDays": 1, "hours": 4 },
+        { "employeeId": 2, "name": "이두리", "workDays": 1, "hours": 5 }
+      ],
+      "assignments": [
+        { "employeeId": 1, "employeeName": "김하나", "workDate": "2026-11-04", "shiftName": "오픈", "startTime": "09:00:00", "endTime": "13:00:00" },
+        { "employeeId": 2, "employeeName": "이두리", "workDate": "2026-11-04", "shiftName": "마감", "startTime": "17:00:00", "endTime": "22:00:00" }
+      ],
+      "dayOffViolations": []
+    }
+  ]
+}
+```
+
+### 대타 추천 응답 예시
+`GET /api/stores/1/swap-requests/1/candidates`
+```json
+[
+  {
+    "employeeId": 3, "name": "박세라", "eligible": true, "weeklyHours": 0,
+    "coveredSkills": ["일본어"],
+    "reasons": ["필요 스킬 보유: 일본어", "희망 휴무 신청일", "가용 시간 09:00~22:00", "이번 주 0시간 근무 중", "시급 11,000원"]
+  },
+  {
+    "employeeId": 2, "name": "이두리", "eligible": false, "weeklyHours": 5,
+    "coveredSkills": [],
+    "reasons": ["같은 날 다른 근무가 있음"]
+  }
+]
+```
 
 
 ## Troubleshooting & Technical Decisions
 
-### 1. Java-Python 프로세스 실행 환경 종속성 (Portability) 문제
-- Issue: 초기 Python 스크립트 실행 경로가 로컬 PC의 절대 경로로 하드코딩되어, 타 환경 배포 및 협업 시 `FileNotFoundException` 발생.
-- Solution: 스크립트를 프로젝트 내부(`src/main/resources/python/`)로 이식. OS 환경에 독립적인 상대 경로 및 표준 `python` 명령어 호출 방식으로 리팩토링하여 시스템 이식성 확보.
+### 1. jar 배포 시 Python 엔진 경로가 깨지는 문제
+- Issue: 초기에는 엔진 스크립트를 로컬 절대 경로로, 이후에는 프로젝트 상대 경로로 실행했다. 상대 경로 방식은 IDE에서는 동작하지만 jar로 패키징하면 스크립트가 jar 내부에 들어가 파일 시스템 경로로 접근할 수 없어 실행에 실패했다.
+- 함께 있던 문제: 실행 명령이 `python`으로 고정되어 `python3`만 있는 환경에서 실패, `waitFor()`에 제한 시간이 없어 엔진이 멈추면 요청 스레드가 무한 대기, stderr가 stdout에 섞여 경고 한 줄에도 결과 JSON 파싱이 깨짐.
+- Solution: `PythonEngineRunner`가 기동 시점에 클래스패스의 `python/*.py`를 임시 디렉토리로 꺼내 두고 그 경로로 실행하도록 변경. 실행 명령과 제한 시간을 환경변수(`PYTHON_COMMAND`, `ENGINE_TIMEOUT_SECONDS`)로 분리하고, 시간 초과 시 프로세스를 강제 종료하며, stdout(결과)과 stderr(로그)를 따로 읽도록 했다.
 
-### 2. 하드코딩 탈피 및 동적 제약조건 주입 아키텍처 적용
-- Issue: 파이썬 엔진 내부의 Base Hourly Wage(기본 시급) 및 Shift Index가 상수로 고정되어 확장성 저하.
-- Solution: Spring Service 레이어에서 DB 데이터를 조회하여 매장 교대근무 사이즈에 맞춘 `Preferred Shifts` 인덱스를 동적으로 생성. 이를 JSON으로 파싱하여 Python 엔진 표준 입력으로 전달하도록 결합도 개선.
+### 2. 인원·스킬 부족 시 근무표 전체가 생성되지 않는 문제 (INFEASIBLE)
+- Issue: 최소 인원과 필요 스킬을 하드 제약으로 두면, 특정 날 가용 인원이 한 명만 모자라도 솔버가 해를 찾지 못해 일주일 근무표 전체가 비어 버린다.
+- Solution: 법적 제약(가용 시간, 주 52시간, 연속 근무)만 하드 제약으로 두고, 최소 인원(5천만)·필수 휴무(1천만)·필요 스킬(8백만)은 고패널티 소프트 제약으로 완화. 채울 수 있으면 반드시 채우고, 채울 수 없는 칸은 `shortages`로 관리자에게 알린다.
 
-### 3. 양방향 연관관계 엔티티 직렬화 시 무한 참조(Infinite Recursion) 오류
-- Issue: `Store`와 `Employee`, `Schedule` 엔티티 간의 1:N 양방향 연관관계가 설정된 상태에서, Python 최적화 엔진에 데이터를 전달하기 위해 Jackson 라이브러리로 JSON 직렬화를 수행하는 중 순환 참조가 발생하여 `StackOverflowError`로 인한 서버 다운 발생.
-- Solution: `@JsonIgnore` 등 엔티티를 훼손하는 임시방편을 지양함. 대신 API 응답 및 Python 프로세스 데이터 전달을 위한 전용 **DTO(Data Transfer Object)**를 설계하여 적용. 엔티티를 직접 노출하지 않고 직렬화 계층을 분리함으로써 순환 참조를 원천 차단하고 시스템 안정성을 확보.
+### 3. 근무표가 저장되지 않는데 성공으로 응답하는 문제
+- Issue: 엔진은 `schedule`(직원 ID + 요일·교대 인덱스)을 반환하는데 자바는 `schedules`(직원 이름·요일·시작 시간)를 기대하고 있어, 근무표가 한 건도 저장되지 않은 채 `success: true`가 반환되었다. 직원도 이름 문자열로 매칭하고 있어 동명이인이 있으면 잘못 배정될 수 있었다.
+- Solution: 엔진 입력에서 직원을 `emp_{id}`, 스킬을 `skill_{id}`로 넘기고, 날짜는 weekStart(월요일) 기준 0~6, 교대는 시작 시간순 인덱스로 고정해 결과를 실제 날짜·시간·직원으로 역매핑. 엔진이 해를 찾지 못하면(`INFEASIBLE`/`UNKNOWN`) DB를 바꾸지 않고 `success: false`를 반환한다.
+
+### 4. 재생성할 때마다 근무표가 크게 바뀌는 문제
+- Issue: 직원 한 명의 휴무가 바뀌어 다시 생성하면, 동점 해 중 아무거나 골라 나머지 직원들의 근무까지 바뀌었다.
+- Solution: 현재 근무표를 `prev_assignments`로 엔진에 넘겨 변경 칸 수에 패널티를 주고, 후보안마다 `changedFromCurrent`를 계산해 보여준다. 생성과 확정을 분리해 관리자가 비교 후 고르게 했다.
+
+### 5. 매장 간 데이터 접근 (인가 누락)
+- Issue: JWT로 로그인 여부만 확인하고 있어, 다른 매장의 `storeId`를 넣으면 근무표·직원 정보를 조회할 수 있었다.
+- Solution: `StoreAccessGuard`에서 매장 소유자(관리자)·소속 직원 여부를 서비스 계층에서 검증하고, 모든 매장 하위 API에 적용.
+
+### 6. Spring Boot 4에서 Swagger 500 오류
+- Issue: springdoc 2.x가 Spring Boot 4와 호환되지 않아 `/v3/api-docs` 호출 시 500 오류가 발생했다.
+- Solution: springdoc-openapi 3.0.3으로 올리고, Swagger UI에서 JWT를 입력할 수 있도록 Bearer 인증 스키마를 등록. CORS 설정을 Security 필터 체인에 연결해 브라우저 preflight 차단도 해결했다.
+
+### 7. 양방향 연관관계 직렬화 시 무한 참조
+- Issue: `Store`·`Employee`·`Schedule` 엔티티를 그대로 JSON으로 직렬화하면서 순환 참조로 `StackOverflowError` 발생.
+- Solution: 엔티티를 직접 노출하지 않고 API 응답과 엔진 입력을 전용 DTO/Map으로 분리해 순환 참조를 원천 차단.
 
 
-##  Branch Strategy
+## Branch Strategy
+- `main`: 배포 가능한 안정 버전. 직접 push하지 않고 PR로만 병합
+- `feat/*`, `fix/*`, `docs/*`: 기능·수정·문서 단위 브랜치 → PR(작업 배경 / 변경 사항 / 검증) → 병합 후 삭제
 
-- `main`: 핵심 비즈니스 로직 및 배포 가능 안정화 버전
-- `feat/security-jwt`: Spring Security 기반 Stateless 인증 및 JWT 파이프라인 (작업 중)
 
+## Swagger API Documentation
+서버 구동 후 http://localhost:8080/swagger-ui/index.html 에서 API 명세 확인 및 테스트 가능.
+`POST /api/auth/login`으로 받은 토큰을 우측 상단 Authorize에 넣으면 인증이 필요한 API도 바로 호출할 수 있다.
 
-## Getting Started & API Docs
-
-### Swagger API Documentation
-서버 구동 후 즉각적인 API 테스트 및 명세 확인이 가능한 Swagger-UI 기반 API 명세서를 제공.
-
-<img width="1900" height="987" alt="image" src="https://github.com/user-attachments/assets/ffee7128-d5f1-4942-b31c-0607af28b02c" />
+<img width="700" alt="Swagger UI" src="docs/images/swagger-ui.png" />

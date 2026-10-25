@@ -2,6 +2,7 @@ package com.example.store_scheduler_backend.controller;
 
 import com.example.store_scheduler_backend.domain.Role;
 import com.example.store_scheduler_backend.service.AuthService;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
@@ -12,6 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
+@Tag(name = "인증 API", description = "회원가입·로그인(JWT 발급)")
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor
 public class AuthController {

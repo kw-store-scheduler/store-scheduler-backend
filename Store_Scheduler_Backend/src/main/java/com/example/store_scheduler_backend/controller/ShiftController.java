@@ -3,6 +3,7 @@ package com.example.store_scheduler_backend.controller;
 import com.example.store_scheduler_backend.domain.Shift;
 import com.example.store_scheduler_backend.domain.ShiftSkillRequirement;
 import com.example.store_scheduler_backend.service.ShiftService;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
@@ -23,6 +24,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 @RestController
+@Tag(name = "근무 시간대 API", description = "교대 시간대와 필요 스킬 설정")
 @RequiredArgsConstructor
 public class ShiftController {
 
