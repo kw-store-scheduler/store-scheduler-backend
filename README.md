@@ -45,8 +45,7 @@ flowchart LR
 
 1. 주간 근무표 자동 생성 (CP-SAT)
    - 하드 제약: 가용 요일·시간 외 배정 금지, 하루 1교대, 주 52시간 이하, 연속 5일 근무 금지
-   - 계층형 패널티(소프트 제약): 최소 인원 > 필수 휴무 > 필요 스킬 > 목표 인원 > 주 15시간(주휴수당) > 기존 근무표 변경 최소화 > 희망 휴무 > 선호 교대 > 근무일수·공휴일 편차
-   - 인원·스킬 부족은 스케줄 전체를 실패시키지 않고 `shortages`로 보고
+   - 최소 인원, 필수 휴무, 필요 스킬 등은 패널티로 처리해서, 인원이 모자라도 근무표는 만들고 부족한 칸을 `shortages`로 알려준다
 2. 후보안 비교 후 확정
    - 생성 단계에서는 근무표를 바꾸지 않고 후보안(최대 3개)만 저장
    - 후보안마다 예상 인건비, 기존 근무표 대비 변경 칸 수, 직원별 근무일·시간, 휴무 위반 표시
@@ -232,76 +231,8 @@ docker compose up -d     # PostgreSQL 16 (scheduler_db / scheduler / scheduler)
 FCM 서비스 계정 키(`firebase-service-account.json`)가 클래스패스에 없으면 푸시 알림만 비활성화되고 나머지 기능은 정상 동작한다.
 
 
-## API Overview
-모든 API는 `Authorization: Bearer {token}` 필요 (회원가입·로그인 제외). 요청·응답 상세는 Swagger 참고.
-
-| 구분 | Method | Path | 권한 |
-|---|---|---|---|
-| 인증 | POST | `/api/auth/signup`, `/api/auth/login` | 공개 |
-| | PATCH | `/api/users/me/device-token` | 로그인 |
-| 매장 | POST, GET | `/api/stores` | 관리자 |
-| | POST | `/api/stores/{storeId}/reissue-code` | 관리자 |
-| 직원 | POST | `/api/stores/join/{storeCode}` | 직원 |
-| | GET | `/api/stores/{storeId}/employees`, `/employees/pending` | 관리자 |
-| | POST | `/api/stores/{storeId}/employees/{employeeId}/approve`, `/reject` | 관리자 |
-| | PATCH | `/api/stores/{storeId}/employees/{employeeId}` | 관리자 |
-| 스킬 | POST, GET | `/api/stores/{storeId}/skills` | 관리자 (조회는 소속 직원도) |
-| | DELETE | `/api/stores/{storeId}/skills/{skillId}` | 관리자 |
-| | POST, DELETE | `/api/stores/{storeId}/employees/{employeeId}/skills/{skillId}` | 관리자 |
-| 근무 시간대 | POST, GET | `/api/stores/{storeId}/shifts` | 관리자 (조회는 소속 직원도) |
-| | PUT | `/api/stores/{storeId}/shifts/{shiftId}/skill-requirements` | 관리자 |
-| 가용 시간 | POST | `/api/availabilities` | 직원 |
-| | GET | `/api/availabilities/my` | 직원 |
-| | PUT, DELETE | `/api/availabilities/{id}` | 직원 본인 |
-| | GET | `/api/stores/{storeId}/availabilities` | 관리자 |
-| 휴무 신청 | POST | `/api/stores/{storeId}/day-offs` | 직원 |
-| | GET | `/api/stores/{storeId}/day-offs/my` | 직원 |
-| | GET | `/api/stores/{storeId}/day-offs?from=&to=` | 관리자 |
-| | DELETE | `/api/stores/{storeId}/day-offs/{requestId}` | 신청한 직원 |
-| 근무표 | POST | `/api/stores/{storeId}/schedules/automate?weekStart=` | 관리자 |
-| | GET | `/api/stores/{storeId}/schedules/proposals/{proposalId}` | 관리자 |
-| | POST | `/api/stores/{storeId}/schedules/proposals/{proposalId}/confirm` | 관리자 |
-| | GET | `/api/stores/{storeId}/schedules`, `/schedules/my` | 소속 직원·관리자 |
-| | PUT, DELETE | `/api/stores/{storeId}/schedules/{scheduleId}` | 관리자 |
-| 결원·대타 | POST | `/api/stores/{storeId}/schedules/{scheduleId}/swap-requests` | 근무 당사자 |
-| | GET | `/api/stores/{storeId}/swap-requests` | 관리자 |
-| | GET | `/api/stores/{storeId}/swap-requests/{requestId}/candidates` | 관리자 |
-| | POST | `/api/stores/{storeId}/swap-requests/{requestId}/offer` | 관리자 |
-| | POST | `/api/stores/{storeId}/swap-requests/{requestId}/accept`, `/decline` | 지정된 직원 |
-| | POST | `/api/stores/{storeId}/swap-requests/{requestId}/cancel` | 요청한 직원 |
-| 급여 | GET | `/api/stores/{storeId}/payroll?yearMonth=` | 관리자 |
-
-### 근무표 후보안 응답 예시
-`POST /api/stores/1/schedules/automate?weekStart=2026-11-02`
-```json
-{
-  "proposalId": 1,
-  "success": true,
-  "status": "OPTIMAL",
-  "message": "근무표 후보안 1개를 생성했습니다.",
-  "weekStart": "2026-11-02",
-  "solveMs": 22,
-  "proposalStatus": "PENDING",
-  "confirmedIndex": null,
-  "shortages": [],
-  "candidates": [
-    {
-      "index": 0,
-      "estimatedCost": 90270,
-      "changedFromCurrent": 2,
-      "employees": [
-        { "employeeId": 1, "name": "김하나", "workDays": 1, "hours": 4 },
-        { "employeeId": 2, "name": "이두리", "workDays": 1, "hours": 5 }
-      ],
-      "assignments": [
-        { "employeeId": 1, "employeeName": "김하나", "workDate": "2026-11-04", "shiftName": "오픈", "startTime": "09:00:00", "endTime": "13:00:00" },
-        { "employeeId": 2, "employeeName": "이두리", "workDate": "2026-11-04", "shiftName": "마감", "startTime": "17:00:00", "endTime": "22:00:00" }
-      ],
-      "dayOffViolations": []
-    }
-  ]
-}
-```
+## API
+전체 명세는 Swagger UI, 실제 호출 순서는 `test.http`를 보면 된다. 회원가입·로그인을 제외한 모든 API는 `Authorization: Bearer {token}`이 필요하다.
 
 ### 대타 추천 응답 예시
 `GET /api/stores/1/swap-requests/1/candidates`
@@ -321,36 +252,30 @@ FCM 서비스 계정 키(`firebase-service-account.json`)가 클래스패스에 
 ```
 
 
-## Troubleshooting & Technical Decisions
+## Troubleshooting
 
-### 1. jar 배포 시 Python 엔진 경로가 깨지는 문제
-- Issue: 초기에는 엔진 스크립트를 로컬 절대 경로로, 이후에는 프로젝트 상대 경로로 실행했다. 상대 경로 방식은 IDE에서는 동작하지만 jar로 패키징하면 스크립트가 jar 내부에 들어가 파일 시스템 경로로 접근할 수 없어 실행에 실패했다.
-- 함께 있던 문제: 실행 명령이 `python`으로 고정되어 `python3`만 있는 환경에서 실패, `waitFor()`에 제한 시간이 없어 엔진이 멈추면 요청 스레드가 무한 대기, stderr가 stdout에 섞여 경고 한 줄에도 결과 JSON 파싱이 깨짐.
-- Solution: `PythonEngineRunner`가 기동 시점에 클래스패스의 `python/*.py`를 임시 디렉토리로 꺼내 두고 그 경로로 실행하도록 변경. 실행 명령과 제한 시간을 환경변수(`PYTHON_COMMAND`, `ENGINE_TIMEOUT_SECONDS`)로 분리하고, 시간 초과 시 프로세스를 강제 종료하며, stdout(결과)과 stderr(로그)를 따로 읽도록 했다.
+### 1. jar로 배포하면 Python 엔진을 못 찾는 문제
+엔진 스크립트를 `src/main/resources/python/...` 상대 경로로 실행하고 있어서 프로젝트 루트에서 `bootRun` 할 때만 동작했다. jar 안에 들어간 파일은 파일 시스템 경로로 열 수 없기 때문이다.
+`PythonEngineRunner`를 만들어 기동 시점에 클래스패스의 스크립트를 임시 디렉토리로 꺼내 두고 그 경로로 실행하도록 바꿨다. 고치는 김에 `python` 명령 고정(→ 환경변수), 무제한 대기(→ 타임아웃 후 강제 종료), stderr가 stdout에 섞여 JSON 파싱이 깨지던 문제도 같이 정리했다.
 
-### 2. 인원·스킬 부족 시 근무표 전체가 생성되지 않는 문제 (INFEASIBLE)
-- Issue: 최소 인원과 필요 스킬을 하드 제약으로 두면, 특정 날 가용 인원이 한 명만 모자라도 솔버가 해를 찾지 못해 일주일 근무표 전체가 비어 버린다.
-- Solution: 법적 제약(가용 시간, 주 52시간, 연속 근무)만 하드 제약으로 두고, 최소 인원(5천만)·필수 휴무(1천만)·필요 스킬(8백만)은 고패널티 소프트 제약으로 완화. 채울 수 있으면 반드시 채우고, 채울 수 없는 칸은 `shortages`로 관리자에게 알린다.
+### 2. 한 칸만 모자라도 근무표 전체가 안 나오는 문제 (INFEASIBLE)
+처음 엔진은 최소 인원이 하드 제약이라, 특정 날 가용 인원이 한 명만 부족해도 일주일 근무표가 통째로 실패했다. 점주 입장에서는 "못 만듦"보다 "이 칸이 비었음"이 훨씬 쓸모 있다.
+그래서 법적 제약(가용 시간, 주 52시간, 연속 근무)만 하드로 남기고 최소 인원·필요 스킬은 큰 패널티로 바꿨다. 채울 수 있으면 채우고, 못 채운 칸은 `shortages`로 응답한다.
 
 ### 3. 근무표가 저장되지 않는데 성공으로 응답하는 문제
-- Issue: 엔진은 `schedule`(직원 ID + 요일·교대 인덱스)을 반환하는데 자바는 `schedules`(직원 이름·요일·시작 시간)를 기대하고 있어, 근무표가 한 건도 저장되지 않은 채 `success: true`가 반환되었다. 직원도 이름 문자열로 매칭하고 있어 동명이인이 있으면 잘못 배정될 수 있었다.
-- Solution: 엔진 입력에서 직원을 `emp_{id}`, 스킬을 `skill_{id}`로 넘기고, 날짜는 weekStart(월요일) 기준 0~6, 교대는 시작 시간순 인덱스로 고정해 결과를 실제 날짜·시간·직원으로 역매핑. 엔진이 해를 찾지 못하면(`INFEASIBLE`/`UNKNOWN`) DB를 바꾸지 않고 `success: false`를 반환한다.
+엔진은 `schedule`(직원 ID + 요일·교대 인덱스)을 반환하는데 자바 쪽은 `schedules`(이름·요일·시간)를 기대하고 있어서, 저장은 0건인데 `success: true`가 나가고 있었다. 직원을 이름으로 찾고 있어서 동명이인도 문제였다.
+직원은 `emp_{id}`로 넘기고, 날짜는 월요일 기준 0~6, 교대는 시작 시간순 인덱스로 고정해서 결과를 다시 날짜·시간·직원으로 바꾸도록 했다. 해를 못 찾으면 DB를 건드리지 않고 `success: false`를 준다.
 
-### 4. 재생성할 때마다 근무표가 크게 바뀌는 문제
-- Issue: 직원 한 명의 휴무가 바뀌어 다시 생성하면, 동점 해 중 아무거나 골라 나머지 직원들의 근무까지 바뀌었다.
-- Solution: 현재 근무표를 `prev_assignments`로 엔진에 넘겨 변경 칸 수에 패널티를 주고, 후보안마다 `changedFromCurrent`를 계산해 보여준다. 생성과 확정을 분리해 관리자가 비교 후 고르게 했다.
+### 4. URL의 storeId만 바꾸면 다른 매장 데이터가 보이는 문제
+JWT로 로그인 여부만 확인하고 있어서, 다른 매장 ID를 넣으면 근무표나 직원 가용 시간이 그대로 조회됐다.
+여러 서비스에 흩어져 있던 점주 확인 로직을 `StoreAccessGuard`로 모은 뒤, 소속(승인된 직원) 검증을 추가해 조회 API에도 적용했다. 권한 실패는 403으로 응답한다.
 
-### 5. 매장 간 데이터 접근 (인가 누락)
-- Issue: JWT로 로그인 여부만 확인하고 있어, 다른 매장의 `storeId`를 넣으면 근무표·직원 정보를 조회할 수 있었다.
-- Solution: `StoreAccessGuard`에서 매장 소유자(관리자)·소속 직원 여부를 서비스 계층에서 검증하고, 모든 매장 하위 API에 적용.
 
-### 6. Spring Boot 4에서 Swagger 500 오류
-- Issue: springdoc 2.x가 Spring Boot 4와 호환되지 않아 `/v3/api-docs` 호출 시 500 오류가 발생했다.
-- Solution: springdoc-openapi 3.0.3으로 올리고, Swagger UI에서 JWT를 입력할 수 있도록 Bearer 인증 스키마를 등록. CORS 설정을 Security 필터 체인에 연결해 브라우저 preflight 차단도 해결했다.
-
-### 7. 양방향 연관관계 직렬화 시 무한 참조
-- Issue: `Store`·`Employee`·`Schedule` 엔티티를 그대로 JSON으로 직렬화하면서 순환 참조로 `StackOverflowError` 발생.
-- Solution: 엔티티를 직접 노출하지 않고 API 응답과 엔진 입력을 전용 DTO/Map으로 분리해 순환 참조를 원천 차단.
+## 한계와 다음 단계
+- 근무별로 "왜 이 사람이 배정됐는지" 사유는 아직 보여주지 않는다. 대타 추천에만 사유가 있다.
+- 후보안은 비용이 같은 대안들만 나온다. 성격이 다른 안(인건비 우선 / 공평성 우선 등)은 목적함수를 바꿔 다시 풀어야 해서 DA 파트와 논의가 필요하다.
+- 필수 휴무는 패널티 방식이라, 대신할 사람이 아예 없으면 깨질 수 있다. 이 경우 응답의 `dayOffViolations`에 표시된다.
+- 엔진을 서브프로세스로 실행하고 있어 요청마다 Python이 새로 뜬다. 트래픽이 늘면 엔진을 별도 서버(FastAPI)로 분리할 계획이다.
 
 
 ## Branch Strategy
