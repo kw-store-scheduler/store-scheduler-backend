@@ -11,6 +11,7 @@ import com.example.store_scheduler_backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import java.time.LocalDate;
 import java.util.List;
 
 @Service
@@ -26,6 +27,12 @@ public class EmployeeService {
 
     @Transactional
     public Employee joinStore(String storeCode, String name, String phoneNumber, String username) {
+        return joinStore(storeCode, name, phoneNumber, null, null, false, null, username);
+    }
+
+    @Transactional
+    public Employee joinStore(String storeCode, String name, String phoneNumber, String nickname, LocalDate startDate,
+                              boolean minor, EmploymentType employmentType, String username) {
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
         Store store = storeRepository.findByStoreCode(storeCode)
@@ -35,7 +42,12 @@ public class EmployeeService {
             throw new IllegalArgumentException("이미 해당 매장에 신청한 이력이 있습니다.");
         });
 
-        return employeeRepository.save(new Employee(name, phoneNumber, store, user));
+        Employee employee = new Employee(name, phoneNumber, store, user);
+        employee.fillJoinProfile(nickname, startDate, minor, employmentType);
+        Employee saved = employeeRepository.save(employee);
+        fcmService.sendToDevice(store.getOwner().getDeviceToken(), "가입 요청",
+                employee.getName() + "님이 " + store.getName() + " 가입을 요청했습니다.");
+        return saved;
     }
 
     @Transactional

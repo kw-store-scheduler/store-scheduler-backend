@@ -47,6 +47,11 @@ public class PayrollService {
         return result;
     }
 
+    // 직원 본인 화면의 예상 급여용. 권한 확인은 호출하는 쪽에서 한다
+    public EmployeePayroll calculateForEmployee(Employee employee, YearMonth yearMonth) {
+        return calculateForEmployee(employee, yearMonth.atDay(1), yearMonth.atEndOfMonth());
+    }
+
     private EmployeePayroll calculateForEmployee(Employee employee, LocalDate start, LocalDate end) {
         List<Schedule> schedules = scheduleRepository.findByEmployeeIdAndWorkDateBetweenOrderByWorkDateAsc(
                 employee.getId(), start, end);

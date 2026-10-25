@@ -5,6 +5,7 @@ import lombok.Getter;
 
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.util.List;
 
 @Getter
 public class ScheduleResponseDto {
@@ -15,6 +16,8 @@ public class ScheduleResponseDto {
     private LocalDate workDate;
     private LocalTime startTime;
     private LocalTime endTime;
+    // 자동 생성 근무표를 확정할 때 저장한 배정 사유. 직접 추가·수정한 근무는 빈 목록
+    private List<String> reasons;
 
     public ScheduleResponseDto(Schedule schedule) {
         this.id = schedule.getId();
@@ -24,5 +27,7 @@ public class ScheduleResponseDto {
         this.workDate = schedule.getWorkDate();
         this.startTime = schedule.getStartTime();
         this.endTime = schedule.getEndTime();
+        this.reasons = schedule.getAssignmentReasons() == null ? List.of()
+                : List.of(schedule.getAssignmentReasons().split("\n"));
     }
 }

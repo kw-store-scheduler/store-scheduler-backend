@@ -11,5 +11,6 @@ import java.util.Optional;
 @Repository
 public interface ClosingReportRepository extends JpaRepository<ClosingReport, Long> {
     Optional<ClosingReport> findByShiftIdAndDate(Long shiftId, LocalDate date);
+    boolean existsByShiftId(Long shiftId);
     List<ClosingReport> findByShift_Store_IdAndDateBetweenOrderByDateAsc(Long storeId, LocalDate from, LocalDate to);
 }

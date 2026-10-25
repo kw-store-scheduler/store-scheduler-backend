@@ -43,7 +43,7 @@ public class ScheduleProposalService {
         return toResponse(findProposal(storeId, proposalId));
     }
 
-    // 선택한 후보안으로 해당 주 근무표를 교체하고 직원들에게 알린다
+    // 선택한 후보안으로 해당 기간 근무표를 교체하고 직원들에게 알린다
     @Transactional
     public ScheduleProposalResponse confirm(Long storeId, Long proposalId, int candidateIndex, String managerUsername) {
         Store store = storeAccessGuard.verifyOwner(storeId, managerUsername);
@@ -74,11 +74,12 @@ public class ScheduleProposalService {
             schedule.setWorkDate(a.workDate());
             schedule.setStartTime(a.startTime());
             schedule.setEndTime(a.endTime());
+            schedule.setAssignmentReasons(a.reasons().isEmpty() ? null : String.join("\n", a.reasons()));
             schedules.add(schedule);
         }
 
         List<Schedule> replaced = scheduleRepository.findByStoreIdAndWorkDateBetween(
-                storeId, proposal.getWeekStart(), proposal.getWeekStart().plusDays(6));
+                storeId, proposal.getWeekStart(), proposal.getPeriodEnd());
         swapRequestService.detachSchedules(replaced);
         scheduleRepository.deleteAll(replaced);
         scheduleRepository.saveAll(schedules);
@@ -109,7 +110,7 @@ public class ScheduleProposalService {
         return new ScheduleProposalResponse(proposal.getId(), true, proposal.getEngineStatus(),
                 ScheduleProposalResponse.messageFor(candidates.size(), shortages.size()),
                 proposal.getWeekStart(), proposal.getSolveMs(), proposal.getStatus(), proposal.getConfirmedIndex(),
-                shortages, candidates, ScheduleProposalResponse.noticeFor(candidates, shortages));
+                shortages, candidates, ScheduleProposalResponse.noticeFor(candidates, shortages), proposal.getPeriodEnd());
     }
 
     private List<Candidate> readCandidates(ScheduleProposal proposal) {

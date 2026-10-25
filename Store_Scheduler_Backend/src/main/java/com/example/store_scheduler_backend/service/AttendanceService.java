@@ -1,0 +1,94 @@
+package com.example.store_scheduler_backend.service;
+
+import com.example.store_scheduler_backend.domain.Attendance;
+import com.example.store_scheduler_backend.domain.Employee;
+import com.example.store_scheduler_backend.domain.Schedule;
+import com.example.store_scheduler_backend.repository.AttendanceRepository;
+import com.example.store_scheduler_backend.repository.ScheduleRepository;
+import lombok.RequiredArgsConstructor;
+import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.time.LocalTime;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.function.Function;
+import java.util.stream.Collectors;
+
+@Service
+@Transactional(readOnly = true)
+@RequiredArgsConstructor
+public class AttendanceService {
+
+    private final AttendanceRepository attendanceRepository;
+    private final ScheduleRepository scheduleRepository;
+    private final StoreAccessGuard storeAccessGuard;
+
+    // scheduledStart가 없으면 근무표에 없는 날 출근한 것
+    public record AttendanceView(Attendance attendance, LocalTime scheduledStart, LocalTime scheduledEnd) {
+        public boolean late() {
+            return scheduledStart != null && attendance.getClockIn().toLocalTime().isAfter(scheduledStart);
+        }
+    }
+
+    @Transactional
+    public AttendanceView clockIn(Long storeId, String username) {
+        Employee employee = storeAccessGuard.verifyApprovedEmployee(storeId, username);
+        LocalDateTime now = LocalDateTime.now();
+        if (attendanceRepository.findByEmployeeIdAndWorkDate(employee.getId(), now.toLocalDate()).isPresent()) {
+            throw new IllegalArgumentException("오늘은 이미 출근 기록이 있습니다.");
+        }
+        return toView(attendanceRepository.save(new Attendance(employee, now)));
+    }
+
+    // 자정을 넘긴 근무는 전날 출근 기록에 퇴근을 찍는다
+    @Transactional
+    public AttendanceView clockOut(Long storeId, String username) {
+        Employee employee = storeAccessGuard.verifyApprovedEmployee(storeId, username);
+        Attendance attendance = attendanceRepository.findFirstByEmployeeIdAndClockOutIsNullOrderByClockInDesc(employee.getId())
+                .orElseThrow(() -> new IllegalArgumentException("퇴근할 출근 기록이 없습니다."));
+        attendance.clockOut(LocalDateTime.now());
+        return toView(attendance);
+    }
+
+    public List<AttendanceView> findByDate(Long storeId, LocalDate date, String managerUsername) {
+        storeAccessGuard.verifyOwner(storeId, managerUsername);
+        Map<Long, Schedule> scheduleByEmployee = scheduleRepository.findByStoreIdAndWorkDateBetween(storeId, date, date).stream()
+                .collect(Collectors.toMap(s -> s.getEmployee().getId(), Function.identity(), (a, b) -> a));
+        return attendanceRepository.findByStoreIdAndWorkDateOrderByClockInAsc(storeId, date).stream()
+                .map(a -> toView(a, Optional.ofNullable(scheduleByEmployee.get(a.getEmployee().getId()))))
+                .toList();
+    }
+
+    public List<AttendanceView> findMine(Long storeId, LocalDate from, LocalDate to, String username) {
+        Employee employee = storeAccessGuard.verifyApprovedEmployee(storeId, username);
+        Map<LocalDate, Schedule> scheduleByDate = scheduleRepository
+                .findByEmployeeIdAndWorkDateBetweenOrderByWorkDateAsc(employee.getId(), from, to).stream()
+                .collect(Collectors.toMap(Schedule::getWorkDate, Function.identity(), (a, b) -> a));
+        return attendanceRepository.findByEmployeeIdAndWorkDateBetweenOrderByWorkDateAsc(employee.getId(), from, to).stream()
+                .map(a -> toView(a, Optional.ofNullable(scheduleByDate.get(a.getWorkDate()))))
+                .toList();
+    }
+
+    public Optional<Attendance> findToday(Long employeeId) {
+        return attendanceRepository.findByEmployeeIdAndWorkDate(employeeId, LocalDate.now());
+    }
+
+    private AttendanceView toView(Attendance attendance) {
+        Optional<Schedule> schedule = scheduleRepository
+                .findByEmployeeIdAndWorkDateBetweenOrderByWorkDateAsc(attendance.getEmployee().getId(),
+                        attendance.getWorkDate(), attendance.getWorkDate()).stream()
+                .min(Comparator.comparing(Schedule::getStartTime));
+        return toView(attendance, schedule);
+    }
+
+    private AttendanceView toView(Attendance attendance, Optional<Schedule> schedule) {
+        return new AttendanceView(attendance,
+                schedule.map(Schedule::getStartTime).orElse(null),
+                schedule.map(Schedule::getEndTime).orElse(null));
+    }
+}

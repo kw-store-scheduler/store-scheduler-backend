@@ -6,6 +6,9 @@ import lombok.NoArgsConstructor;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Arrays;
+import java.util.List;
+import java.util.stream.Collectors;
 
 // 날짜별 휴무 신청. MUST는 엔진에서 사실상 하드 제약, PREFER는 가능하면 지켜준다
 @Entity
@@ -31,14 +34,29 @@ public class DayOffRequest {
 
     private String reason;
 
+    // DayOffFallback 이름을 순서대로 쉼표로 이어 저장. 희망 휴무에만 쓴다
+    private String fallbacks;
+
     @Column(nullable = false)
     private LocalDateTime createdAt;
 
     public DayOffRequest(Employee employee, LocalDate date, DayOffType type, String reason) {
+        this(employee, date, type, reason, List.of());
+    }
+
+    public DayOffRequest(Employee employee, LocalDate date, DayOffType type, String reason, List<DayOffFallback> fallbacks) {
         this.employee = employee;
         this.date = date;
         this.type = type;
         this.reason = reason;
+        this.fallbacks = fallbacks.isEmpty() ? null : fallbacks.stream().map(Enum::name).collect(Collectors.joining(","));
         this.createdAt = LocalDateTime.now();
+    }
+
+    public List<DayOffFallback> getFallbackList() {
+        if (fallbacks == null || fallbacks.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(fallbacks.split(",")).map(DayOffFallback::valueOf).toList();
     }
 }

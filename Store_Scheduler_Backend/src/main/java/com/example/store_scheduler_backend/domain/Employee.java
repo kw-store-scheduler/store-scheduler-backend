@@ -3,6 +3,8 @@ package com.example.store_scheduler_backend.domain;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.HashSet;
 import java.util.Set;
 
@@ -19,6 +21,16 @@ public class Employee {
     private String name;
 
     private String phoneNumber;
+
+    // 매장에서 부르는 이름. 없으면 name을 쓴다
+    private String nickname;
+
+    private LocalDate startDate;
+
+    // 22시~06시 근무와 하루 7시간 넘는 교대에서 제외. 기존 데이터 때문에 null 허용, null은 false로 본다
+    private Boolean minor;
+
+    private LocalDateTime requestedAt;
 
     private Integer hourlyWage;
 
@@ -53,6 +65,23 @@ public class Employee {
         this.user = user;
         this.hourlyWage = 0;
         this.status = EmployeeStatus.PENDING;
+        this.requestedAt = LocalDateTime.now();
+    }
+
+    // 가입 화면에서 직원이 고른 고용 형태. 점주가 승인할 때 바꿀 수 있다
+    public void fillJoinProfile(String nickname, LocalDate startDate, boolean minor, EmploymentType employmentType) {
+        this.nickname = nickname;
+        this.startDate = startDate;
+        this.minor = minor;
+        this.employmentType = employmentType;
+    }
+
+    public boolean isMinor() {
+        return Boolean.TRUE.equals(minor);
+    }
+
+    public String getDisplayName() {
+        return nickname != null && !nickname.isBlank() ? nickname : name;
     }
 
     public void approve(int hourlyWage) {

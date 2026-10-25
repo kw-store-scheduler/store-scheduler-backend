@@ -45,31 +45,52 @@ flowchart LR
 
 ## Key Features
 
-1. 주간 근무표 자동 생성 (CP-SAT)
-   - 하드 제약: 가용 요일·시간 외 배정 금지, 하루 1교대, 주 52시간 이하, 연속 5일 근무 금지
+1. 주간·월간 근무표 자동 생성 (CP-SAT)
+   - `weekStart`(월요일)를 주면 7일, `month`(yyyy-MM)를 주면 한 달 치를 만든다. 월간은 주 52시간·주 15시간을 달력 주마다 따진다
+   - 하드 제약: 가용 요일·시간(또는 제출한 희망 칸) 외 배정 금지, 하루 1교대(쪼개기 근무 설정 시 겹치지 않는 2교대), 주 52시간 이하, 연속 5일 근무 금지, 미성년자 22~06시·7시간 초과 교대 금지
+   - 인원은 교대 기본값 → 요일별 인원 → 예외일(단체 예약, 휴점) 순으로 덮어써 날짜마다 다르게 넘긴다
    - 최소 인원, 필수 휴무, 필요 스킬 등은 패널티로 처리해서, 인원이 모자라도 근무표는 만들고 부족한 칸을 `shortages`로 알려준다
 2. 후보안 비교 후 확정
-   - 같은 입력을 기준만 바꿔 세 번 풀어 성격이 다른 후보안을 만든다: 균형 해 / 최소 비용 해 / 최고 공평 해(근무일 차이 최소). 결과가 같은 안은 하나로 합친다
+   - 같은 입력을 기준만 바꿔 세 번 풀어 성격이 다른 후보안을 만든다: 공정 우선(근무일·주말 근무 차이 최소) / 인건비 우선 / 희망 우선(선호 칸·희망 휴무·개인 규칙 우선). 결과가 같은 안은 하나로 합친다
+   - 후보안마다 희망 반영률, 주말 근무 최대 차이, 노동법 위반 건수(결과 재검사), 최소 인원 충족률, "최소 인원만 채운 칸" 주의 문구를 계산
    - 생성 단계에서는 근무표를 바꾸지 않고 후보안(최대 3개)만 저장
    - 최소 인원이 필수 휴무보다 우선이다. 누군가의 필수 휴무를 깨야 하면 정규직 휴무를 알바보다 먼저 깨고, 그 칸에는 예비 대타 후보(불가능하면 사유)를 붙인다
    - 인원 부족·휴무 위반 건수를 응답 `notice`로 요약하고 관리자에게 푸시로 알린다
    - 후보안마다 예상 인건비, 기존 근무표 대비 변경 칸 수, 직원별 근무일·시간, 휴무 위반 표시
-   - 근무마다 배정 사유 표시 (기존 근무 유지, 필요 스킬 보유, 가용 시간, 이번 주 근무 시간과 직원 평균)
-   - 관리자가 고른 후보안을 확정할 때만 근무표 교체 + 직원 푸시 알림
-3. 결원 · 대타
-   - 직원이 결원 요청 → 관리자에게 대타 추천 → 지정 → 대상 직원 수락/거절
+   - 근무마다 배정 사유 표시 (기존 근무 유지, 필요 스킬 보유, 선호 칸/가능 칸 또는 가용 시간, 이번 주·이번 달 근무 시간과 직원 평균)
+   - 관리자가 고른 후보안을 확정할 때만 근무표 교체 + 직원 푸시 알림. 배정 사유는 근무표에 저장해 직원의 "내 근무표"에서 보인다
+3. 결원 · 대타 · 빈 근무 게시판
+   - 직원이 결원 요청 → 빈 근무 게시판에 자동 게시 + 대신할 수 있는 직원 전원에게 푸시 → 지원자 중 관리자가 승인하면 담당자 변경
+   - 관리자가 직접 지정 → 대상 직원 수락/거절하는 기존 흐름도 유지. "후보 전체에게 일괄 요청"은 가능한 직원 전원에게 다시 알린다
+   - 관리자는 단체 예약·피크처럼 추가 인원 모집 글도 올린다. 모집 인원이 차면 나머지 지원은 거절
+   - 직원 화면에는 글마다 지원 가능 여부와 불가 사유, 예상 수당, 이번 주 내 근무가 함께 나온다
    - 추천은 근무표 생성과 같은 규칙으로 가능 여부를 판단하고, 결원으로 모자라게 된 스킬 보유자 → 희망 휴무 아님 → 이번 주 근무 시간 → 시급 순으로 정렬
    - 불가능한 직원은 "같은 날 다른 근무가 있음", "연속 5일 근무가 됨" 등 사유 표시
 4. 다음 달 인력 제안
    - 관리자가 날짜·교대별 마감 보고(객수, 매출)를 입력
    - 다음 달 직전 4주의 요일·교대별 평균 객수 ÷ 직원 1명당 감당 객수(매장 설정, 기본 30명)로 필요 인원을 제안하고 현재 설정과 비교(증원·유지·감원)
-5. 직원 입력
-   - 요일별 가용 시간, 날짜별 휴무 신청(필수/희망), 스킬
-   - 교대별 필요 스킬 인원(예: 오픈에 일본어 가능자 1명), 요일 전용 교대
-6. 급여 자동 계산
+5. 직원 입력 (다음 달 희망 제출)
+   - 날짜×교대 칸을 가능/선호로 고르고, 매주 고정 일정(수업 등)과 겹치는 칸은 잠긴다
+   - 개인 근무 규칙: 주말 최대 횟수, 월 근무량 범위, 최대 연속 근무일, 마감 다음 날 오픈 금지
+   - 희망끼리 부딪힐 때 지킬 순서(휴무·선호 교대·주말·근무량·리듬)를 정하면 순위대로 엔진 패널티 배율을 키운다
+   - 날짜별 휴무 신청(필수/희망). 필수는 한 달 2일까지이고 넘으면 희망으로 받는다. 희망 휴무에는 안 될 때의 대안 순서를 남기고, "오후만 쉬기"는 엔진에 반영한다
+   - 희망을 내지 않은 직원은 기존처럼 요일별 가용 시간으로 배정한다
+   - 확정 후 희망 반영 리포트: 선호 반영률, 휴무 수용률, 최근 4주 주말·마감·야간 근무의 팀 평균 비교, 반영하지 못한 근무와 사유
+6. 매장 설정
+   - 업종(카페·편의점 등)을 고르면 업종별 스킬과 기본 교대를 만들어 준다
+   - 교대 수정·삭제, 요일별 최소·목표 인원, 예외일, 교대별 필요 스킬 인원(예: 오픈에 일본어 가능자 1명), 요일 전용 교대
+   - 쪼개기 근무 허용, 다음 달 희망 제출 마감일, 필수 휴무 보장
+7. 홈 · 출퇴근 · 공지 · 연차
+   - 점주 홈: 이번 주 예상 인건비, 승인 대기, 진행 중인 결원, 오늘 교대별 인원, 출근 기록, 다음 달 희망 제출 현황, 연차 대기
+   - 알바 홈: 오늘 근무와 같이 일하는 사람, 이번 주 근무, 나에게 온 대타 요청, 이번 달 예상 급여, 남은 연차(정규직), 최신 공지
+   - 출근·퇴근 기록(지각 표시), 공지, 날짜별 업무 체크리스트
+   - 정규직 연차: 근로기준법 60조 기준 발생 일수 계산, 신청·승인. 승인하면 그날을 필수 휴무로 등록
+8. 급여 자동 계산
    - 월별 기본급 + 주휴수당(주 15시간 이상), 자정을 넘는 근무 처리
-7. 인증 · 권한
+9. 인증 · 권한
    - JWT, 관리자/직원 역할 구분, 매장 소속·소유 검증(`StoreAccessGuard`)으로 다른 매장 데이터 접근 차단
+   - 로그인 후 `GET /api/users/me`로 역할·소유 매장·합류 상태를 보고 화면을 고른다. 매장이나 합류 신청이 없으면 역할을 바꿀 수 있다
+   - 직원 합류 신청 시 고용 형태·닉네임·근무 시작일·미성년자 여부를 받는다
 
 
 ## ERD
@@ -90,6 +111,20 @@ erDiagram
     SHIFT ||--o{ SHIFT_SKILL_REQUIREMENT : "requires"
     SKILL ||--o{ SHIFT_SKILL_REQUIREMENT : "required by"
     SCHEDULE ||--o{ SWAP_REQUEST : "absence of"
+    EMPLOYEE ||--o{ SHIFT_PREFERENCE : "submits"
+    SHIFT ||--o{ SHIFT_PREFERENCE : "for"
+    EMPLOYEE ||--o{ PREFERENCE_SUBMISSION : "submits"
+    EMPLOYEE ||--o{ FIXED_SCHEDULE : "has"
+    SHIFT ||--o{ SHIFT_DAY_STAFFING : "per weekday"
+    STORE ||--o{ STAFFING_EXCEPTION : "has"
+    STORE ||--o{ OPEN_SHIFT : "posts"
+    SWAP_REQUEST ||--o| OPEN_SHIFT : "posted as"
+    OPEN_SHIFT ||--o{ SHIFT_APPLICATION : "receives"
+    EMPLOYEE ||--o{ SHIFT_APPLICATION : "applies"
+    EMPLOYEE ||--o{ ATTENDANCE : "clocks"
+    EMPLOYEE ||--o{ LEAVE_REQUEST : "requests"
+    STORE ||--o{ NOTICE : "posts"
+    STORE ||--o{ STORE_TASK : "assigns"
 
     USER {
         Long id PK
@@ -175,6 +210,63 @@ erDiagram
         Long requester_id FK
         Long substitute_id FK
     }
+    SHIFT_PREFERENCE {
+        Long id PK
+        LocalDate date
+        PreferenceLevel level "AVAILABLE / PREFERRED"
+        Long employee_id FK
+        Long shift_id FK
+    }
+    PREFERENCE_SUBMISSION {
+        Long id PK
+        LocalDate targetMonth
+        Integer maxWeekendShifts
+        Integer minMonthlyHours
+        Integer maxMonthlyHours
+        Integer maxConsecutiveDays
+        boolean noOpenAfterClose
+        String priorities
+        Long employee_id FK
+    }
+    FIXED_SCHEDULE {
+        Long id PK
+        DayOfWeek dayOfWeek
+        LocalTime startTime
+        LocalTime endTime
+        String label
+        Long employee_id FK
+    }
+    SHIFT_DAY_STAFFING {
+        Long id PK
+        DayOfWeek dayOfWeek
+        int minStaff
+        int targetStaff
+        Long shift_id FK
+    }
+    STAFFING_EXCEPTION {
+        Long id PK
+        LocalDate date
+        int minStaff
+        int targetStaff
+        Long shift_id FK "null이면 그날 전체"
+        Long store_id FK
+    }
+    OPEN_SHIFT {
+        Long id PK
+        OpenShiftKind kind "VACANCY / EXTRA"
+        LocalDate workDate
+        String title
+        int headcount
+        OpenShiftStatus status
+        Long swap_request_id FK
+        Long store_id FK
+    }
+    SHIFT_APPLICATION {
+        Long id PK
+        ApplicationStatus status
+        Long open_shift_id FK
+        Long employee_id FK
+    }
 ```
 
 
@@ -193,7 +285,10 @@ Store_Scheduler_Backend/
       │    ├── repository/
       │    ├── security/        # JWT 발급·검증 필터
       │    └── service/
-      │         ├── ScheduleAutomationService  # 엔진 입력 구성 · 결과 해석 · 후보안 생성
+      │         ├── ScheduleAutomationService  # 엔진 입력 구성 · 결과 해석 · 후보안 생성 · 지표 계산
+      │         ├── StaffingPlanService        # 날짜별 최소·목표 인원 (기본값 → 요일별 → 예외일)
+      │         ├── PreferenceService          # 희망 제출 · 고정 일정 · 제출 현황
+      │         ├── OpenShiftService           # 빈 근무 게시판 · 지원 · 승인
       │         ├── ScheduleProposalService    # 후보안 조회 · 확정
       │         ├── ScheduleEngine             # 엔진 호출 (HttpEngineClient / PythonEngineRunner)
       │         ├── SubstituteFinder           # 대타 추천
@@ -304,7 +399,10 @@ JWT로 로그인 여부만 확인하고 있어서, 다른 매장 ID를 넣으면
 - 후보안 하나당 엔진을 한 번씩 더 풀기 때문에 생성 시간이 최대 세 배 가까이 걸린다. 매장 규모가 커지면 기준별 풀이를 병렬로 돌리거나 시간 제한을 나눠야 한다.
 - 예비 대타는 같은 규칙(가용 시간, 하루 1교대, 주 52시간, 연속 근무)으로 고르기 때문에, 조건을 모두 만족하는 사람이 있었다면 엔진이 이미 그 사람을 배정했을 가능성이 높다. 그래서 대부분 "누가 왜 안 되는지"를 보여주는 역할을 한다.
 - 필수 휴무는 기본적으로 패널티 방식이라 대신할 사람이 아예 없으면 깨질 수 있다(`dayOffViolations`에 표시). 매장 설정 `guaranteeMustDayOff`를 켜면 그날을 근무 불가로 처리해 절대 배정하지 않고, 대신 빈 칸을 인원 부족으로 보고한다.
-- 인력 제안은 요일마다 다른 인원을 추천하지만, 근무 시간대의 필요 인원은 요일과 관계없이 하나라 제안을 자동 반영하지 않는다. 요일별 차등 인원은 엔진 쪽 지원이 필요하다.
+- 인력 제안은 요일·교대별 인원을 추천하고 요일별 인원 설정도 생겼지만, 제안을 설정에 자동으로 옮기지는 않는다. 관리자가 보고 요일별 인원에 반영한다.
+- 개인 근무 규칙(주말 횟수, 연속 근무, 근무 리듬, 근무량)은 희망 휴무와 같은 단계의 패널티라, 인원이 모자라면 깨질 수 있다. 어떤 규칙이 깨졌는지는 후보안 지표와 희망 반영 리포트로만 보인다.
+- 업무 체크리스트는 날짜별로 등록한다. 매일 반복되는 업무 템플릿은 아직 없다.
+- 프로필 사진, 소셜 로그인(카카오·네이버·Apple)은 아직 없다.
 - Render 무료 배포는 내장 실행 방식을 쓴다. 무료 서비스는 15분간 요청이 없으면 잠들어서, 엔진 서버를 따로 띄우면 첫 근무표 생성 때 두 서비스가 차례로 깨어나며 1분 넘게 걸리기 때문이다. 유료 플랜으로 옮기면 `engine-server`를 별도 서비스로 배포하고 백엔드에 `ENGINE_URL`만 지정하면 된다.
 
 

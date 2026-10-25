@@ -32,6 +32,10 @@ public class User {
         this.role = role;
     }
 
+    public void changeRole(Role role) {
+        this.role = role;
+    }
+
     public void updateDeviceToken(String deviceToken) {
         this.deviceToken = deviceToken;
     }

@@ -1,5 +1,6 @@
 package com.example.store_scheduler_backend.service;
 
+import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.EmployeeStatus;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
@@ -60,6 +61,15 @@ public class StoreAccessGuard {
             throw new AccessDeniedException("해당 매장 소속만 접근할 수 있습니다.");
         }
         return store;
+    }
+
+    /**
+     * 요청자가 해당 매장의 승인된 직원인지 검증하고, 그 직원을 반환한다.
+     */
+    public Employee verifyApprovedEmployee(Long storeId, String username) {
+        return employeeRepository.findByStoreIdAndUser_Username(storeId, username)
+                .filter(e -> e.getStatus() == EmployeeStatus.APPROVED)
+                .orElseThrow(() -> new AccessDeniedException("해당 매장의 승인된 직원만 이용할 수 있습니다."));
     }
 
     private boolean isOwner(Store store, String username) {

@@ -17,6 +17,8 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -33,7 +35,9 @@ public class StoreEmployeeController {
             @PathVariable String storeCode,
             @Valid @RequestBody JoinRequest request,
             @AuthenticationPrincipal UserDetails userDetails) {
-        Employee employee = employeeService.joinStore(storeCode, request.getName(), request.getPhoneNumber(), userDetails.getUsername());
+        Employee employee = employeeService.joinStore(storeCode, request.getName(), request.getPhoneNumber(),
+                request.getNickname(), request.getStartDate(), Boolean.TRUE.equals(request.getMinor()),
+                request.getEmploymentType(), userDetails.getUsername());
         return ResponseEntity.ok(new JoinResponse(employee.getId(), employee.getStatus().name()));
     }
 
@@ -105,6 +109,11 @@ public class StoreEmployeeController {
         @NotBlank(message = "이름을 입력해주세요.")
         private String name;
         private String phoneNumber;
+        private String nickname;
+        private LocalDate startDate;
+        private Boolean minor;
+        // 생략하면 알바(PART_TIME). 점주가 승인할 때 바꿀 수 있다
+        private EmploymentType employmentType;
     }
 
     @Data
@@ -128,20 +137,28 @@ public class StoreEmployeeController {
     static class EmployeeResponse {
         private Long id;
         private String name;
+        private String nickname;
         private String phoneNumber;
         private Integer hourlyWage;
         private String status;
         private EmploymentType employmentType;
+        private LocalDate startDate;
+        private boolean minor;
+        private LocalDateTime requestedAt;
         private List<String> skills;
 
         static EmployeeResponse from(Employee e) {
             return new EmployeeResponse(
                     e.getId(),
                     e.getName(),
+                    e.getNickname(),
                     e.getPhoneNumber(),
                     e.getHourlyWage(),
                     e.getStatus().name(),
                     e.getEmploymentType(),
+                    e.getStartDate(),
+                    e.isMinor(),
+                    e.getRequestedAt(),
                     e.getSkills().stream().map(Skill::getName).collect(Collectors.toList())
             );
         }

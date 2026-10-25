@@ -51,6 +51,18 @@ public class SecurityConfig {
                         .requestMatchers("/api/stores/*/schedules/automate").hasRole("MANAGER")
                         .requestMatchers("/api/stores/*/schedules/proposals/**").hasRole("MANAGER")
                         .requestMatchers("/api/stores/*/schedules").authenticated()
+                        .requestMatchers("/api/stores/*/home/owner").hasRole("MANAGER")
+                        .requestMatchers("/api/stores/*/home/worker").hasRole("EMPLOYEE")
+                        .requestMatchers("/api/stores/*/attendance/clock-in", "/api/stores/*/attendance/clock-out",
+                                "/api/stores/*/attendance/my").hasRole("EMPLOYEE")
+                        .requestMatchers("/api/stores/*/attendance").hasRole("MANAGER")
+                        .requestMatchers("/api/stores/*/preferences/my", "/api/stores/*/fixed-schedules/my",
+                                "/api/stores/*/preference-report/my").hasRole("EMPLOYEE")
+                        .requestMatchers("/api/stores/*/preferences").hasRole("MANAGER")
+                        .requestMatchers("/api/stores/*/tasks/my").hasRole("EMPLOYEE")
+                        .requestMatchers("/api/stores/*/leaves/my").hasRole("EMPLOYEE")
+                        .requestMatchers(HttpMethod.GET, "/api/stores/*/leaves").hasRole("MANAGER")
+                        .requestMatchers(HttpMethod.POST, "/api/stores/*/leaves").hasRole("EMPLOYEE")
                         .anyRequest().authenticated()
                 )
                 // 앱이 "다시 로그인"(401)과 "권한 없음"(403)을 구분할 수 있게 둘 다 JSON 메시지로 응답

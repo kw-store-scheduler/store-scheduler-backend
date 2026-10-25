@@ -1,13 +1,19 @@
 package com.example.store_scheduler_backend.service;
 
+import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.Role;
+import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.domain.User;
+import com.example.store_scheduler_backend.repository.EmployeeRepository;
+import com.example.store_scheduler_backend.repository.StoreRepository;
 import com.example.store_scheduler_backend.repository.UserRepository;
 import com.example.store_scheduler_backend.security.JwtTokenProvider;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -16,6 +22,11 @@ public class AuthService {
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtTokenProvider jwtTokenProvider;
+    private final StoreRepository storeRepository;
+    private final EmployeeRepository employeeRepository;
+
+    public record Me(User user, List<Store> ownedStores, List<Employee> memberships) {
+    }
 
     @Transactional
     public void signup(String username, String password, Role role) {
@@ -32,6 +43,31 @@ public class AuthService {
             throw new IllegalArgumentException("아이디 또는 비밀번호가 올바르지 않습니다.");
         }
         return jwtTokenProvider.createToken(user.getUsername(), user.getRole().name());
+    }
+
+    @Transactional(readOnly = true)
+    public Me getMe(String username) {
+        User user = findUser(username);
+        return new Me(user, storeRepository.findByOwner_Username(username), employeeRepository.findByUserId(user.getId()));
+    }
+
+    // 로그인 후 역할 선택 화면용. 매장을 만들었거나 합류 신청을 했으면 역할이 섞이지 않도록 막는다
+    @Transactional
+    public String changeRole(String username, Role role) {
+        User user = findUser(username);
+        if (user.getRole() != role) {
+            if (!storeRepository.findByOwner_Username(username).isEmpty()
+                    || !employeeRepository.findByUserId(user.getId()).isEmpty()) {
+                throw new IllegalArgumentException("매장을 등록했거나 합류 신청한 계정은 역할을 바꿀 수 없습니다.");
+            }
+            user.changeRole(role);
+        }
+        return jwtTokenProvider.createToken(user.getUsername(), user.getRole().name());
+    }
+
+    private User findUser(String username) {
+        return userRepository.findByUsername(username)
+                .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));
     }
 
     @Transactional
