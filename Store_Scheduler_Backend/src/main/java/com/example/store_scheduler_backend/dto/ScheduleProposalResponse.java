@@ -54,8 +54,9 @@ public class ScheduleProposalResponse {
     public record EmployeeSummary(Long employeeId, String name, int workDays, int hours) {
     }
 
+    // reasons: 이 직원이 이 근무에 배정된 근거 (기존 근무 유지, 필요 스킬, 가용 시간, 이번 주 근무 시간 등)
     public record Assignment(Long employeeId, String employeeName, LocalDate workDate,
-                             String shiftName, LocalTime startTime, LocalTime endTime) {
+                             String shiftName, LocalTime startTime, LocalTime endTime, List<String> reasons) {
     }
 
     // skillName이 있으면 해당 스킬 보유자 부족, 없으면 인원 자체 부족
