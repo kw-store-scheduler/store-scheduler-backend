@@ -6,7 +6,7 @@ Spring Boot와 Python OR-Tools(CP-SAT Solver)를 결합한 매장 교대근무 �
 
 ## Tech Stack
 - Backend: Java 17 / Spring Boot 4.0.6 / Spring Data JPA / Spring Security + JWT (jjwt 0.11.5)
-- Algorithm Engine: Python 3 / Google OR-Tools (CP-SAT)
+- Algorithm Engine: Python 3 / Google OR-Tools (CP-SAT) / FastAPI (엔진 서버)
 - Database: PostgreSQL 16 (로컬은 Docker Compose), 테스트는 H2
 - Docs: Swagger UI (springdoc-openapi 3.0.3)
 - Push: Firebase Cloud Messaging (firebase-admin 9.3.0)
@@ -19,24 +19,26 @@ flowchart LR
     subgraph Server["Spring Boot"]
         API["REST API<br/>JWT 인증 · 매장 권한 검증"]
         Auto["ScheduleAutomationService<br/>엔진 입력 구성 · 결과 해석"]
-        Runner["PythonEngineRunner"]
+        Port["ScheduleEngine"]
     end
+    EngineServer["Engine Server<br/>FastAPI · POST /solve"]
     Engine["Python Engine<br/>OR-Tools CP-SAT"]
     DB[("PostgreSQL")]
     FCM["Firebase Cloud Messaging"]
 
     Client -->|"HTTP / JSON"| API
-    API --> Auto --> Runner
-    Runner -->|"stdin: config JSON"| Engine
-    Engine -->|"stdout: result JSON"| Runner
+    API --> Auto --> Port
+    Port -->|"ENGINE_URL 있음: HTTP"| EngineServer --> Engine
+    Port -.->|"없음: 서브프로세스 stdin/stdout"| Engine
     API <-->|"Spring Data JPA"| DB
     API -->|"확정 · 대타 알림"| FCM
     FCM -.->|push| Client
 ```
 
-- Spring Boot가 DB에서 직원·교대·가용 시간·휴무·스킬을 모아 엔진 입력 JSON을 만들고, `ProcessBuilder`로 Python 엔진을 별도 프로세스로 실행한다.
-- 입력은 stdin, 결과는 stdout으로 JSON 한 개를 주고받는다. 엔진 오류는 stderr와 exit code로 받아 API 오류로 변환한다.
-- 엔진 스크립트는 클래스패스(`resources/python/`)에 포함되며, 기동 시 임시 디렉토리로 꺼내 실행하므로 jar 배포에서도 경로가 깨지지 않는다.
+- Spring Boot가 DB에서 직원·교대·가용 시간·휴무·스킬을 모아 엔진 입력 JSON을 만들고 `ScheduleEngine`으로 엔진을 호출한다. 호출 방식은 두 가지이고 입출력 JSON은 같다.
+  - **엔진 서버 (FastAPI)**: `ENGINE_URL`을 지정하면 `engine-server`의 `POST /solve`를 HTTP로 호출한다. 엔진을 백엔드와 따로 배포·확장할 수 있다. `ENGINE_TOKEN`으로 백엔드 외의 호출을 막는다.
+  - **내장 실행 (기본)**: `ENGINE_URL`이 없으면 `ProcessBuilder`로 같은 서버에서 Python을 실행한다(stdin → stdout). 엔진 스크립트는 클래스패스(`resources/python/`)에 포함되어 기동 시 임시 디렉토리로 꺼내 실행하므로 jar 배포에서도 경로가 깨지지 않는다.
+- 엔진 서버와 내장 실행은 같은 `run_engine.solve()`를 쓰므로 결과가 같다.
 - 엔진 원본은 [store-scheduler-da](https://github.com/kw-store-scheduler/store-scheduler-da)의 `scheduler_core_0527.py`이고, 백엔드의 `scheduler_core.py`는 같은 파일이다.
 
 
@@ -178,8 +180,9 @@ erDiagram
 
 ## Directory Structure
 ```text
+engine-server/                  # 엔진 HTTP 서버 (FastAPI, POST /solve)
 Store_Scheduler_Backend/
- ├── docker-compose.yml         # 로컬 PostgreSQL
+ ├── docker-compose.yml         # 로컬 PostgreSQL + (선택) 엔진 서버
  ├── test.http                  # 전체 API 흐름 예제 (IntelliJ HTTP Client)
  └── src/main/
       ├── java/com/example/store_scheduler_backend/
@@ -192,7 +195,7 @@ Store_Scheduler_Backend/
       │    └── service/
       │         ├── ScheduleAutomationService  # 엔진 입력 구성 · 결과 해석 · 후보안 생성
       │         ├── ScheduleProposalService    # 후보안 조회 · 확정
-      │         ├── PythonEngineRunner         # Python 프로세스 실행
+      │         ├── ScheduleEngine             # 엔진 호출 (HttpEngineClient / PythonEngineRunner)
       │         ├── SubstituteFinder           # 대타 추천
       │         ├── PayrollService             # 급여 계산
       │         └── StoreAccessGuard           # 매장 소속 · 소유 검증
@@ -215,8 +218,13 @@ Store_Scheduler_Backend/
 ### 로컬 실행
 ```bash
 cd Store_Scheduler_Backend
-docker compose up -d     # PostgreSQL 16 (scheduler_db / scheduler / scheduler)
-./gradlew bootRun        # local 프로파일 자동 적용 → http://localhost:8080
+docker compose up -d postgres   # PostgreSQL 16 (scheduler_db / scheduler / scheduler)
+./gradlew bootRun               # local 프로파일 자동 적용 → http://localhost:8080, 엔진은 내장 실행
+```
+엔진 서버로 분리해서 실행하려면:
+```bash
+docker compose up -d engine     # http://localhost:8000 (GET /health, POST /solve)
+ENGINE_URL=http://localhost:8000 ENGINE_TOKEN=local-engine-token ./gradlew bootRun
 ```
 - Swagger UI: http://localhost:8080/swagger-ui/index.html (우측 상단 Authorize에 로그인 토큰 입력)
 - 전체 흐름 예제: `Store_Scheduler_Backend/test.http`를 위에서부터 실행하면 회원가입 → 매장 등록 → 근무표 생성 → 대타 → 급여까지 확인할 수 있다.
@@ -235,6 +243,8 @@ PR과 main push마다 GitHub Actions(`.github/workflows/test.yml`)에서 OR-Tool
 | `JWT_EXPIRATION_TIME` | 토큰 만료(ms) | 3600000 |
 | `PYTHON_COMMAND` | Python 실행 명령 (가상환경 경로 등) | python3 |
 | `ENGINE_TIMEOUT_SECONDS` | 엔진 응답 대기 한도 | 60 |
+| `ENGINE_URL` | 엔진 서버 주소. 비우면 내장 실행 | 없음 |
+| `ENGINE_TOKEN` | 엔진 서버 호출 토큰 (엔진 서버의 `ENGINE_TOKEN`과 같은 값) | 없음 |
 | `CORS_ALLOWED_ORIGINS` | 추가로 허용할 웹 프론트 출처(쉼표 구분). localhost는 포트와 관계없이 항상 허용 | 없음 |
 
 FCM 서비스 계정 키(`firebase-service-account.json`)가 클래스패스에 없으면 푸시 알림만 비활성화되고 나머지 기능은 정상 동작한다.
@@ -294,7 +304,7 @@ JWT로 로그인 여부만 확인하고 있어서, 다른 매장 ID를 넣으면
 - 예비 대타는 같은 규칙(가용 시간, 하루 1교대, 주 52시간, 연속 근무)으로 고르기 때문에, 조건을 모두 만족하는 사람이 있었다면 엔진이 이미 그 사람을 배정했을 가능성이 높다. 그래서 대부분 "누가 왜 안 되는지"를 보여주는 역할을 한다.
 - 필수 휴무는 기본적으로 패널티 방식이라 대신할 사람이 아예 없으면 깨질 수 있다(`dayOffViolations`에 표시). 매장 설정 `guaranteeMustDayOff`를 켜면 그날을 근무 불가로 처리해 절대 배정하지 않고, 대신 빈 칸을 인원 부족으로 보고한다.
 - 인력 제안은 요일마다 다른 인원을 추천하지만, 근무 시간대의 필요 인원은 요일과 관계없이 하나라 제안을 자동 반영하지 않는다. 요일별 차등 인원은 엔진 쪽 지원이 필요하다.
-- 엔진을 서브프로세스로 실행하고 있어 요청마다 Python이 새로 뜬다. 트래픽이 늘면 엔진을 별도 서버(FastAPI)로 분리할 계획이다.
+- Render 무료 배포는 내장 실행 방식을 쓴다. 무료 서비스는 15분간 요청이 없으면 잠들어서, 엔진 서버를 따로 띄우면 첫 근무표 생성 때 두 서비스가 차례로 깨어나며 1분 넘게 걸리기 때문이다. 유료 플랜으로 옮기면 `engine-server`를 별도 서비스로 배포하고 백엔드에 `ENGINE_URL`만 지정하면 된다.
 
 
 ## Branch Strategy

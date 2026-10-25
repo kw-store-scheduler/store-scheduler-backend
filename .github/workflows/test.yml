@@ -23,7 +23,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: pip install ortools==9.15.6755
+      # 엔진 서버와 같은 버전을 설치하고, 엔진 서버 앱이 import되는지 확인한다
+      - run: pip install -r ../engine-server/requirements.txt
+      - run: PYTHONPATH=src/main/resources/python:../engine-server python -c "import app"
 
       - uses: gradle/actions/setup-gradle@v4
 

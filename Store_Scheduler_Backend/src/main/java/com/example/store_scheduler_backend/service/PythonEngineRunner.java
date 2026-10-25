@@ -2,6 +2,7 @@ package com.example.store_scheduler_backend.service;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.stereotype.Component;
@@ -20,9 +21,11 @@ import java.util.concurrent.TimeUnit;
 
 // CP-SAT 파이썬 엔진을 서브프로세스로 실행한다. (stdin: config JSON → stdout: 결과 JSON)
 // jar 배포 시에도 동작하도록 클래스패스의 python/*.py를 기동 시점에 임시 디렉토리로 꺼내 두고 실행한다.
+// 엔진 서버 주소(scheduler.engine.url)가 없을 때 쓰는 기본 방식
 @Slf4j
 @Component
-public class PythonEngineRunner {
+@ConditionalOnExpression("'${scheduler.engine.url:}'.isEmpty()")
+public class PythonEngineRunner implements ScheduleEngine {
 
     private final ObjectMapper objectMapper;
     private final String pythonCommand;
@@ -40,6 +43,7 @@ public class PythonEngineRunner {
         this.scriptPath = extractScripts(scriptDir, entryScript);
     }
 
+    @Override
     @SuppressWarnings("unchecked")
     public Map<String, Object> run(Map<String, Object> config) {
         Process process;

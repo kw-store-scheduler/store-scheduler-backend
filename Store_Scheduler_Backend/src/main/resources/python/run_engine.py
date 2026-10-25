@@ -10,6 +10,7 @@ scheduler_core.py는 store-scheduler-da 레포의 scheduler_core_0527.py와 같�
 - max_alt_solutions: solve_schedule()의 인자로 전달 (기본 3)
 
 예외가 나면 traceback이 stderr로 출력되고 exit code 1로 종료된다.
+엔진 서버(engine-server/app.py)도 같은 solve()를 쓴다.
 """
 
 import json
@@ -18,15 +19,17 @@ import sys
 from scheduler_core import solve_schedule
 
 
-def main():
-    config = json.loads(sys.stdin.read())
-
+def solve(config):
     prev = config.get("prev_assignments")
     if isinstance(prev, list):
         config["prev_assignments"] = {(p["employee_id"], p["day"]): p["shift"] for p in prev}
 
     max_alt = config.pop("max_alt_solutions", 3)
-    result = solve_schedule(config, max_alt_solutions=max_alt)
+    return solve_schedule(config, max_alt_solutions=max_alt)
+
+
+def main():
+    result = solve(json.loads(sys.stdin.read()))
     sys.stdout.write(json.dumps(result, ensure_ascii=False))
 
 
