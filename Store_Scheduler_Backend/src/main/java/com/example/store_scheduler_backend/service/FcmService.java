@@ -12,11 +12,16 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 
 @Service
 public class FcmService {
+
+    @Value("${fcm.credentials:}")
+    private String credentialsJson;
 
     @Value("${fcm.credential-path:firebase-service-account.json}")
     private String credentialPath;
@@ -25,7 +30,7 @@ public class FcmService {
 
     @PostConstruct
     public void init() {
-        try (InputStream credentials = new ClassPathResource(credentialPath).getInputStream()) {
+        try (InputStream credentials = openCredentials()) {
             if (FirebaseApp.getApps().isEmpty()) {
                 FirebaseOptions options = FirebaseOptions.builder()
                         .setCredentials(GoogleCredentials.fromStream(credentials))
@@ -36,6 +41,14 @@ public class FcmService {
         } catch (IOException e) {
             System.out.println("[FCM] 서비스 계정 키를 찾을 수 없어 푸시 알림이 비활성화됩니다.");
         }
+    }
+
+    // 배포 환경에서는 키 파일을 저장소에 둘 수 없어 환경변수 값을 우선한다
+    private InputStream openCredentials() throws IOException {
+        if (credentialsJson != null && !credentialsJson.isBlank()) {
+            return new ByteArrayInputStream(credentialsJson.getBytes(StandardCharsets.UTF_8));
+        }
+        return new ClassPathResource(credentialPath).getInputStream();
     }
 
     public void sendToDevice(String deviceToken, String title, String body) {
