@@ -1,4 +1,4 @@
-# 로컬 개발용 PostgreSQL
+# 로컬 개발용 PostgreSQL + (선택) 엔진 서버
 # 실행: docker compose up -d   /   종료: docker compose down   /   데이터까지 삭제: docker compose down -v
 services:
   postgres:
@@ -18,6 +18,18 @@ services:
       interval: 5s
       timeout: 3s
       retries: 10
+
+  # 최적화 엔진 서버(FastAPI). 백엔드를 ENGINE_URL=http://localhost:8000 으로 실행하면 이 서버로 엔진을 호출한다
+  # 실행: docker compose up -d engine
+  engine:
+    build:
+      context: ..
+      dockerfile: engine-server/Dockerfile
+    container_name: scheduler-engine
+    environment:
+      ENGINE_TOKEN: ${ENGINE_TOKEN:-local-engine-token}
+    ports:
+      - "8000:8000"
 
 volumes:
   scheduler-pgdata:

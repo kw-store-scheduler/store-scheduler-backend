@@ -77,7 +77,7 @@ public class ScheduleAutomationService {
     private record LabeledSolution(String label, String description, List<Map<String, Object>> solution) {
     }
 
-    private final PythonEngineRunner pythonEngineRunner;
+    private final ScheduleEngine scheduleEngine;
     private final StoreAccessGuard storeAccessGuard;
     private final EmployeeRepository employeeRepository;
     private final AvailabilityRepository availabilityRepository;
@@ -121,7 +121,7 @@ public class ScheduleAutomationService {
         config.put("prev_assignments", toPrevAssignments(current, weekStart, employees, shifts));
 
         // 인원·스킬 부족과 상태는 균형 해 기준. 균형 해가 없으면 다른 기준으로도 찾을 수 없다
-        Map<String, Object> result = pythonEngineRunner.run(withPlan(config, PLANS.get(0)));
+        Map<String, Object> result = scheduleEngine.run(withPlan(config, PLANS.get(0)));
         String status = (String) result.get("status");
         if (result.get("schedule") == null) {
             return ScheduleProposalResponse.failed(status, weekStart);
@@ -130,7 +130,7 @@ public class ScheduleAutomationService {
         List<LabeledSolution> solutions = new ArrayList<>();
         solutions.add(new LabeledSolution(PLANS.get(0).label(), PLANS.get(0).description(), toSolution(result.get("schedule"))));
         for (Plan plan : PLANS.subList(1, PLANS.size())) {
-            Map<String, Object> planResult = pythonEngineRunner.run(withPlan(config, plan));
+            Map<String, Object> planResult = scheduleEngine.run(withPlan(config, plan));
             solveMs += solveMsOf(planResult);
             if (planResult.get("schedule") != null) {
                 solutions.add(new LabeledSolution(plan.label(), plan.description(), toSolution(planResult.get("schedule"))));

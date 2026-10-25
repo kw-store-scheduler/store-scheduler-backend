@@ -41,5 +41,9 @@ scheduler:
   engine:
     # 파이썬 실행 명령. 가상환경을 쓰는 경우 해당 python 경로를 지정한다.
     python-command: ${PYTHON_COMMAND:python3}
+    # 엔진 서버(engine-server) 주소. 지정하면 HTTP로 호출하고, 비우면 이 서버에서 파이썬 프로세스로 실행한다.
+    url: ${ENGINE_URL:}
+    # 엔진 서버의 ENGINE_TOKEN과 같은 값
+    token: ${ENGINE_TOKEN:}
     # 엔진 응답 대기 한도(초). 솔버 time_limit보다 여유 있게 잡는다.
     timeout-seconds: ${ENGINE_TIMEOUT_SECONDS:60}
