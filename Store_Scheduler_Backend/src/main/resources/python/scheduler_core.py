@@ -114,6 +114,9 @@ def solve_schedule(config: dict, max_alt_solutions: int = 3) -> dict:
           "weight_scale": {"PREF_W": 2.0},    # 이 직원의 개인 선호 패널티 배율 (우선순위 반영)
           off_requests 항목에 "shifts": [1, 2] # 일부 교대만 쉬기 (예: 오후만 쉬기)
           "mentor_required_days": [0, 1, 2],  # (7차 추가, 하드) 수습 기간. 이 날 근무하면 같은 교대에 수습이 아닌 직원이 1명 이상
+          "max_weekly_hours": 48,             # (7차 추가, 하드) 직원별 주 최대 시간. 다른 직장 시간을 뺀 값 (없으면 max_hours)
+          "avoid_shifts": [2],                # (7차 추가) 피하고 싶은 교대
+          "rest_days_together": True,         # (7차 추가) 주마다 쉬는 날을 이틀 붙여서
 
     Returns
     -------
@@ -225,14 +228,15 @@ def solve_schedule(config: dict, max_alt_solutions: int = 3) -> dict:
 
     # ── [하드 3] 주 52시간 초과 금지 (근로기준법) ─
     # (6차 수정) weeks가 있으면 주마다 적용. 없으면 기존처럼 전체 기간에 적용
-    for e in range(E):
+    for e, emp in enumerate(employees):
+        weekly_cap = min(config.get("max_hours", 52), emp.get("max_weekly_hours", config.get("max_hours", 52)))
         for wk in week_groups:
             weekly_hours = sum(
                 work[e, d, s] * shifts[s]["hours"]
                 for d in wk
                 for s in range(S)
             )
-            model.Add(weekly_hours <= config.get("max_hours", 52))
+            model.Add(weekly_hours <= weekly_cap)
 
     # ── [하드 4] 연속 5일 이상 근무 금지 ─────────
     for e in range(E):
@@ -428,6 +432,8 @@ def solve_schedule(config: dict, max_alt_solutions: int = 3) -> dict:
     CONSEC_W  = _w("CONSEC_W", 300_000)
     RHYTHM_W  = _w("RHYTHM_W", 300_000)
     HOURS_W   = _w("HOURS_W", 20_000)    # 범위를 벗어난 1시간당
+    AVOID_W   = _w("AVOID_W", 300_000)   # (7차) 피하고 싶은 교대 배정 1건
+    REST_PAIR_W = _w("REST_PAIR_W", 200_000)  # (7차) 쉬는 날을 붙이지 못한 주 1개
     personal_terms = []
     weekend_days = [d for d in config.get("weekend_days", []) if d < D]
     open_shifts  = [s for s in config.get("open_shifts", []) if s < S]
@@ -459,6 +465,31 @@ def solve_schedule(config: dict, max_alt_solutions: int = 3) -> dict:
                     for o in open_shifts:
                         model.Add(work[e, d, c] + work[e, d + 1, o] <= 1 + v)
                 personal_terms.append((v, _ew(emp, "RHYTHM_W", RHYTHM_W)))
+
+        for s in emp.get("avoid_shifts", []):
+            if s < S:
+                for d in range(D):
+                    personal_terms.append((work[e, d, s], _ew(emp, "AVOID_W", AVOID_W)))
+
+        # 7일이 다 들어 있는 주마다, 이어진 이틀을 모두 쉬는 날이 한 번이라도 있으면 충족
+        if emp.get("rest_days_together"):
+            full_weeks = [wk for wk in week_groups if len(wk) == 7]
+            for w, wk in enumerate(full_weeks):
+                rest = []
+                for d in wk:
+                    r = model.NewBoolVar(f"rest_{e}_{d}")
+                    model.Add(sum(work[e, d, s] for s in range(S)) == 0).OnlyEnforceIf(r)
+                    model.Add(sum(work[e, d, s] for s in range(S)) >= 1).OnlyEnforceIf(r.Not())
+                    rest.append(r)
+                pairs = []
+                for i in range(len(rest) - 1):
+                    p = model.NewBoolVar(f"rp_{e}_{w}_{i}")
+                    model.AddBoolAnd([rest[i], rest[i + 1]]).OnlyEnforceIf(p)
+                    model.AddBoolOr([rest[i].Not(), rest[i + 1].Not()]).OnlyEnforceIf(p.Not())
+                    pairs.append(p)
+                missing = model.NewBoolVar(f"rpm_{e}_{w}")
+                model.AddBoolOr(pairs + [missing])
+                personal_terms.append((missing, _ew(emp, "REST_PAIR_W", REST_PAIR_W)))
 
         min_h, max_h = emp.get("min_total_hours"), emp.get("max_total_hours")
         if min_h is not None or max_h is not None:

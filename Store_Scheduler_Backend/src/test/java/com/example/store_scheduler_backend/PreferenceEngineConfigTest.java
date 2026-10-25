@@ -5,6 +5,10 @@ import com.example.store_scheduler_backend.domain.DayOffFallback;
 import com.example.store_scheduler_backend.domain.DayOffRequest;
 import com.example.store_scheduler_backend.domain.DayOffType;
 import com.example.store_scheduler_backend.domain.Employee;
+import com.example.store_scheduler_backend.domain.EmploymentType;
+import com.example.store_scheduler_backend.domain.FixedScheduleCategory;
+import com.example.store_scheduler_backend.domain.ShiftAttitude;
+import com.example.store_scheduler_backend.domain.UnavailablePeriod;
 import com.example.store_scheduler_backend.domain.EmployeePermission;
 import com.example.store_scheduler_backend.domain.EmployeeSkillLevel;
 import com.example.store_scheduler_backend.domain.Skill;
@@ -34,6 +38,7 @@ import com.example.store_scheduler_backend.repository.ShiftPreferenceRepository;
 import com.example.store_scheduler_backend.repository.ShiftRepository;
 import com.example.store_scheduler_backend.repository.StaffingExceptionRepository;
 import com.example.store_scheduler_backend.repository.StoreRepository;
+import com.example.store_scheduler_backend.repository.UnavailablePeriodRepository;
 import com.example.store_scheduler_backend.repository.UserRepository;
 import com.example.store_scheduler_backend.service.PythonEngineRunner;
 import com.example.store_scheduler_backend.service.ScheduleAutomationService;
@@ -91,6 +96,7 @@ class PreferenceEngineConfigTest {
     @Autowired SkillRepository skillRepository;
     @Autowired EmployeeSkillLevelRepository levelRepository;
     @Autowired SkillWindowRequirementRepository windowRepository;
+    @Autowired UnavailablePeriodRepository unavailablePeriodRepository;
 
     private Store store;
     private Employee employee;
@@ -240,6 +246,77 @@ class PreferenceEngineConfigTest {
         assertThat(ordering.get("shifts")).isEqualTo(List.of(OPEN));
         assertThat(ordering.get("days")).isEqualTo(List.of(1, 4));
         assertThat(ordering.get("weight")).isEqualTo(300_000);
+    }
+
+    @Test
+    void 정규직은_교대_선호와_휴무_붙이기를_넘기고_가용_시간이_없어도_매일_가능하다() {
+        Employee jisu = new Employee("지수", null, store, userRepository.save(new User("jisu", "pw", Role.EMPLOYEE)));
+        jisu.fillJoinProfile(null, null, false, EmploymentType.FULL_TIME);
+        jisu.approve(12_000);
+        employeeRepository.save(jisu);
+        PreferenceSubmission submission = new PreferenceSubmission(jisu, NOVEMBER.atDay(1));
+        submission.update(null, null, null, null, true, List.of());
+        submission.updateFullTimeOptions(Map.of(open.getId(), ShiftAttitude.PREFER, close.getId(), ShiftAttitude.AVOID), true);
+        submissionRepository.save(submission);
+
+        Map<String, Object> config = employeeConfigOf(weekly(), jisu);
+
+        assertThat((List<Integer>) config.get("available_days")).hasSize(7);
+        assertThat(config.get("preferred_shifts")).isEqualTo(List.of(OPEN));
+        assertThat(config.get("avoid_shifts")).isEqualTo(List.of(CLOSE));
+        assertThat(config.get("rest_days_together")).isEqualTo(true);
+        assertThat(config).doesNotContainKey("preferred_slots");
+    }
+
+    @Test
+    void 월간_근무량은_계약_범위가_기본이고_승인_없이_계약_상한을_넘지_않는다() {
+        employee.updateContract(15, 20);
+        PreferenceSubmission submission = new PreferenceSubmission(employee, NOVEMBER.atDay(1));
+        submission.update(null, null, 100, null, false, List.of());
+        submission.decideContractExceed(false);
+        submissionRepository.save(submission);
+
+        Map<String, Object> config = employeeConfig(monthly());
+        assertThat(config.get("min_total_hours")).isEqualTo(64);
+        assertThat(config.get("max_total_hours")).isEqualTo(86);
+
+        submission.decideContractExceed(true);
+        assertThat(employeeConfig(monthly()).get("max_total_hours")).isEqualTo(100);
+    }
+
+    @Test
+    void 다른_직장_시간은_주_최대_시간에서_빼고_이번_달_예외_기간은_그날_전부_막는다() {
+        fixedScheduleRepository.save(new FixedSchedule(employee, DayOfWeek.FRIDAY, LocalTime.of(18, 0), LocalTime.of(22, 0), "편의점",
+                FixedScheduleCategory.OTHER_JOB, null, null));
+        unavailablePeriodRepository.save(new UnavailablePeriod(employee, WEEK_START.plusDays(1), WEEK_START.plusDays(1), false, "시험"));
+
+        Map<String, Object> config = employeeConfig(weekly());
+
+        assertThat(config.get("max_weekly_hours")).isEqualTo(48);
+        assertThat((List<Map<String, Integer>>) config.get("unavailable_slots"))
+                .contains(slot(1, OPEN), slot(1, MIDDLE), slot(1, CLOSE), slot(4, CLOSE));
+    }
+
+    @Test
+    void 연차를_대안으로_둔_휴무는_정규직_필수_휴무만큼_반차는_오후_교대만_지킨다() {
+        dayOffRequestRepository.save(new DayOffRequest(employee, WEEK_START, DayOffType.PREFER, null, List.of(DayOffFallback.ANNUAL_LEAVE)));
+        dayOffRequestRepository.save(new DayOffRequest(employee, WEEK_START.plusDays(1), DayOffType.PREFER, null,
+                List.of(DayOffFallback.HALF_DAY)));
+
+        assertThat((List<Map<String, Object>>) employeeConfig(weekly()).get("off_requests")).containsExactlyInAnyOrder(
+                Map.of("day", 0, "type", "prefer", "weight", 9_000_000),
+                Map.of("day", 1, "type", "prefer"),
+                Map.of("day", 1, "type", "must", "shifts", List.of(MIDDLE, CLOSE), "weight", 9_000_000));
+    }
+
+    private Map<String, Object> employeeConfigOf(Map<String, Object> config, Employee target) {
+        for (Object e : (List<?>) config.get("employees")) {
+            Map<String, Object> map = (Map<String, Object>) e;
+            if (map.get("id").equals("emp_" + target.getId())) {
+                return map;
+            }
+        }
+        throw new AssertionError("직원 없음: " + target.getId());
     }
 
     private Map<String, Object> weekly() {

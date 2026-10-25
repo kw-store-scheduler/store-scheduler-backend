@@ -35,6 +35,11 @@ public class Employee {
 
     private LocalDateTime requestedAt;
 
+    // 근로계약상 주 근무 시간 범위. 점주가 정한다
+    private Integer contractMinWeeklyHours;
+
+    private Integer contractMaxWeeklyHours;
+
     // 이 날짜까지 수습. 수습 중에는 수습이 아닌 직원과 같은 교대에만 배치된다
     private LocalDate probationUntil;
 
@@ -90,6 +95,11 @@ public class Employee {
 
     public boolean isMinor() {
         return Boolean.TRUE.equals(minor);
+    }
+
+    public void updateContract(Integer minWeeklyHours, Integer maxWeeklyHours) {
+        this.contractMinWeeklyHours = minWeeklyHours;
+        this.contractMaxWeeklyHours = maxWeeklyHours;
     }
 
     public boolean isOnProbation(LocalDate date) {

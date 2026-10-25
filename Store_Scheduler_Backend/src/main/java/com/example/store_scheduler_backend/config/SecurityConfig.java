@@ -56,7 +56,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/stores/*/attendance/clock-in", "/api/stores/*/attendance/clock-out",
                                 "/api/stores/*/attendance/my").hasRole("EMPLOYEE")
                         .requestMatchers("/api/stores/*/attendance").hasRole("MANAGER")
-                        .requestMatchers("/api/stores/*/preferences/my", "/api/stores/*/fixed-schedules/my",
+                        .requestMatchers("/api/stores/*/preferences/my", "/api/stores/*/preferences/my/**",
+                                "/api/stores/*/unavailable-periods/my", "/api/stores/*/fixed-schedules/my",
                                 "/api/stores/*/preference-report/my").hasRole("EMPLOYEE")
                         .requestMatchers("/api/stores/*/preferences").hasRole("MANAGER")
                         .requestMatchers("/api/stores/*/tasks/my").hasRole("EMPLOYEE")
