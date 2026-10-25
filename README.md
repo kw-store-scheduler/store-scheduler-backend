@@ -231,6 +231,14 @@ PR과 main push마다 GitHub Actions(`.github/workflows/test.yml`)에서 OR-Tool
 
 FCM 서비스 계정 키(`firebase-service-account.json`)가 클래스패스에 없으면 푸시 알림만 비활성화되고 나머지 기능은 정상 동작한다.
 
+### 배포 (Docker / Render)
+- `Dockerfile`: Spring Boot jar와 Python OR-Tools를 한 이미지로 묶는다. `PORT` 환경변수로 포트를 받는다.
+- `render.yaml`: Render Blueprint. 웹 서비스와 PostgreSQL을 함께 만들고 DB 접속 정보·`JWT_SECRET`을 자동으로 연결한다.
+```bash
+docker build -t store-scheduler .
+docker run -p 8080:8080 -e DB_URL=... -e DB_USERNAME=... -e DB_PASSWORD=... -e JWT_SECRET=... store-scheduler
+```
+
 
 ## API
 전체 명세는 Swagger UI, 실제 호출 순서는 `test.http`를 보면 된다. 회원가입·로그인을 제외한 모든 API는 `Authorization: Bearer {token}`이 필요하다.
