@@ -34,7 +34,7 @@ public class SecurityConfig {
                 .cors(Customizer.withDefaults())
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/swagger-ui/**", "/v3/api-docs/**").permitAll()
+                        .requestMatchers("/", "/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/api/stores/join/**").hasRole("EMPLOYEE")
                         .requestMatchers("/api/availabilities/my", "/api/availabilities", "/api/availabilities/**").hasRole("EMPLOYEE")
