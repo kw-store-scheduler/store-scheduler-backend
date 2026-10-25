@@ -47,3 +47,8 @@ scheduler:
     token: ${ENGINE_TOKEN:}
     # 엔진 응답 대기 한도(초). 솔버 time_limit보다 여유 있게 잡는다.
     timeout-seconds: ${ENGINE_TIMEOUT_SECONDS:60}
+
+fcm:
+  # 서비스 계정 키 JSON 내용. 지정하지 않으면 클래스패스의 credential-path 파일을 찾는다.
+  credentials: ${FIREBASE_CREDENTIALS:}
+  credential-path: firebase-service-account.json

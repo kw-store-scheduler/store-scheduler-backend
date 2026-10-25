@@ -245,9 +245,10 @@ PR과 main push마다 GitHub Actions(`.github/workflows/test.yml`)에서 OR-Tool
 | `ENGINE_TIMEOUT_SECONDS` | 엔진 응답 대기 한도 | 60 |
 | `ENGINE_URL` | 엔진 서버 주소. 비우면 내장 실행 | 없음 |
 | `ENGINE_TOKEN` | 엔진 서버 호출 토큰 (엔진 서버의 `ENGINE_TOKEN`과 같은 값) | 없음 |
+| `FIREBASE_CREDENTIALS` | FCM 서비스 계정 키 JSON 내용. 비우면 클래스패스의 `firebase-service-account.json`을 찾는다 | 없음 |
 | `CORS_ALLOWED_ORIGINS` | 추가로 허용할 웹 프론트 출처(쉼표 구분). localhost는 포트와 관계없이 항상 허용 | 없음 |
 
-FCM 서비스 계정 키(`firebase-service-account.json`)가 클래스패스에 없으면 푸시 알림만 비활성화되고 나머지 기능은 정상 동작한다.
+FCM 서비스 계정 키가 `FIREBASE_CREDENTIALS`와 클래스패스(`firebase-service-account.json`) 어디에도 없으면 푸시 알림만 비활성화되고 나머지 기능은 정상 동작한다.
 
 ### 배포 (Docker / Render)
 - `Dockerfile`: Spring Boot jar와 Python OR-Tools를 한 이미지로 묶는다. `PORT` 환경변수로 포트를 받는다.
