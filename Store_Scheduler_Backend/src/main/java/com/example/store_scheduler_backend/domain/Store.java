@@ -27,6 +27,9 @@ public class Store {
     @JoinColumn(name = "owner_id", nullable = false)
     private User owner;
 
+    // true면 대신할 사람이 없어도 필수 휴무일에는 배정하지 않는다. 기존 매장 데이터 때문에 null 허용, null은 false로 본다
+    private Boolean guaranteeMustDayOff;
+
     @OneToMany(mappedBy = "store", cascade = CascadeType.ALL)
     private List<Employee> employees = new ArrayList<>();
 
@@ -39,5 +42,13 @@ public class Store {
 
     public void reissueCode(String newCode) {
         this.storeCode = newCode;
+    }
+
+    public boolean isMustDayOffGuaranteed() {
+        return Boolean.TRUE.equals(guaranteeMustDayOff);
+    }
+
+    public void updateSettings(boolean guaranteeMustDayOff) {
+        this.guaranteeMustDayOff = guaranteeMustDayOff;
     }
 }

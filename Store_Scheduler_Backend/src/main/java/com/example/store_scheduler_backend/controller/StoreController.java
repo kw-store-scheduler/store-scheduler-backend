@@ -5,6 +5,7 @@ import com.example.store_scheduler_backend.service.StoreService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -40,11 +41,21 @@ public class StoreController {
         return ResponseEntity.ok(new StoreCreateResponse(storeId, newCode));
     }
 
+    // 관리자: 근무표 생성 규칙 설정 (guaranteeMustDayOff: 대신할 사람이 없어도 필수 휴무 보장)
+    @PatchMapping("/{storeId}/settings")
+    public ResponseEntity<StoreResponse> updateSettings(
+            @PathVariable Long storeId,
+            @Valid @RequestBody StoreSettingsRequest request,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        return ResponseEntity.ok(StoreResponse.from(
+                storeService.updateSettings(storeId, request.getGuaranteeMustDayOff(), userDetails.getUsername())));
+    }
+
     // 관리자: 본인이 소유한 매장 목록 조회
     @GetMapping
     public ResponseEntity<List<StoreResponse>> getMyStores(@AuthenticationPrincipal UserDetails userDetails) {
         List<StoreResponse> result = storeService.findMyStores(userDetails.getUsername()).stream()
-                .map(s -> new StoreResponse(s.getId(), s.getName(), s.getAddress(), s.getStoreCode()))
+                .map(StoreResponse::from)
                 .collect(Collectors.toList());
         return ResponseEntity.ok(result);
     }
@@ -54,6 +65,12 @@ public class StoreController {
         @NotBlank(message = "매장 이름을 입력해주세요.")
         private String name;
         private String address;
+    }
+
+    @Data
+    static class StoreSettingsRequest {
+        @NotNull(message = "guaranteeMustDayOff 값을 입력해주세요.")
+        private Boolean guaranteeMustDayOff;
     }
 
     @Data
@@ -70,5 +87,11 @@ public class StoreController {
         private String name;
         private String address;
         private String storeCode;
+        private boolean guaranteeMustDayOff;
+
+        static StoreResponse from(Store store) {
+            return new StoreResponse(store.getId(), store.getName(), store.getAddress(), store.getStoreCode(),
+                    store.isMustDayOffGuaranteed());
+        }
     }
 }
