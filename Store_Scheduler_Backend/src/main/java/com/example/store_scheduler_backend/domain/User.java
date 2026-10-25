@@ -26,6 +26,9 @@ public class User {
 
     private String deviceToken;
 
+    // 푸시 알림 받기. 기존 데이터 때문에 null 허용, null은 켜짐
+    private Boolean notificationsEnabled;
+
     public User(String username, String password, Role role) {
         this.username = username;
         this.password = password;
@@ -34,6 +37,14 @@ public class User {
 
     public void changeRole(Role role) {
         this.role = role;
+    }
+
+    public boolean isNotificationsEnabled() {
+        return !Boolean.FALSE.equals(notificationsEnabled);
+    }
+
+    public void updateNotificationsEnabled(boolean enabled) {
+        this.notificationsEnabled = enabled;
     }
 
     public void updateDeviceToken(String deviceToken) {

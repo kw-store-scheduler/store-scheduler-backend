@@ -4,6 +4,8 @@ import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.EmployeeStatus;
 import com.example.store_scheduler_backend.domain.ProposalStatus;
 import com.example.store_scheduler_backend.domain.Schedule;
+import com.example.store_scheduler_backend.domain.ScheduleAcknowledgement;
+import com.example.store_scheduler_backend.domain.Shift;
 import com.example.store_scheduler_backend.domain.ScheduleProposal;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.dto.ScheduleProposalResponse;
@@ -12,7 +14,9 @@ import com.example.store_scheduler_backend.dto.ScheduleProposalResponse.Candidat
 import com.example.store_scheduler_backend.dto.ScheduleProposalResponse.Shortage;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
 import com.example.store_scheduler_backend.repository.ScheduleProposalRepository;
+import com.example.store_scheduler_backend.repository.ScheduleAcknowledgementRepository;
 import com.example.store_scheduler_backend.repository.ScheduleRepository;
+import com.example.store_scheduler_backend.repository.ShiftRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -38,6 +42,9 @@ public class ScheduleProposalService {
     private final SwapRequestService swapRequestService;
     private final ShiftTradeService shiftTradeService;
     private final ObjectMapper objectMapper;
+    private final ShiftRepository shiftRepository;
+    private final StaffingPlanService staffingPlanService;
+    private final ScheduleAcknowledgementRepository acknowledgementRepository;
 
     public ScheduleProposalResponse getProposal(Long storeId, Long proposalId, String managerUsername) {
         storeAccessGuard.verifyOwner(storeId, managerUsername);
@@ -62,6 +69,9 @@ public class ScheduleProposalService {
         Map<Long, Employee> employeeById = employees.stream()
                 .collect(Collectors.toMap(Employee::getId, Function.identity()));
 
+        // 예외일에 교대 시간을 바꿨으면(마감 23시까지 등) 그날 근무 시각에 반영한다
+        List<Shift> shifts = shiftRepository.findByStoreId(storeId);
+        StaffingPlanService.Plan plan = staffingPlanService.planFor(storeId, proposal.getWeekStart(), proposal.getPeriodEnd());
         List<Schedule> schedules = new ArrayList<>();
         for (Assignment a : candidates.get(candidateIndex).assignments()) {
             Employee employee = employeeById.get(a.employeeId());
@@ -75,7 +85,17 @@ public class ScheduleProposalService {
             schedule.setWorkDate(a.workDate());
             schedule.setStartTime(a.startTime());
             schedule.setEndTime(a.endTime());
-            schedule.setAssignmentReasons(a.reasons().isEmpty() ? null : String.join("\n", a.reasons()));
+            List<String> reasons = new ArrayList<>(a.reasons());
+            shifts.stream()
+                    .filter(sh -> sh.getStartTime().equals(a.startTime()) && sh.getEndTime().equals(a.endTime()))
+                    .findFirst()
+                    .map(sh -> plan.timeOverride(sh, a.workDate()))
+                    .ifPresent(times -> {
+                        schedule.setStartTime(times[0]);
+                        schedule.setEndTime(times[1]);
+                        reasons.add("예외일 시간 변경 " + times[0] + "~" + times[1]);
+                    });
+            schedule.setAssignmentReasons(reasons.isEmpty() ? null : String.join("\n", reasons));
             schedules.add(schedule);
         }
 
@@ -87,14 +107,45 @@ public class ScheduleProposalService {
         scheduleRepository.saveAll(schedules);
         proposal.confirm(candidateIndex);
 
+        Candidate chosen = candidates.get(candidateIndex);
+        String summary = chosen.metrics() != null && chosen.metrics().preferenceRate() != null
+                ? " 희망 반영 " + chosen.metrics().preferenceRate() + "%." : "";
         for (Employee employee : employees) {
-            fcmService.sendToDevice(
-                    employee.getUser().getDeviceToken(),
-                    "근무표 업데이트",
-                    "새로운 근무표가 등록되었습니다. 확인해주세요."
-            );
+            acknowledgementRepository.save(new ScheduleAcknowledgement(proposal, employee));
+            fcmService.send(employee.getUser(), "근무표가 확정됐어요",
+                    proposal.getWeekStart() + "~" + proposal.getPeriodEnd() + " 근무표가 확정됐어요." + summary + " 배정 사유를 확인해 보세요.");
         }
         return toResponse(proposal);
+    }
+
+    // 점주: 확정 근무표를 누가 확인했는지
+    public List<ScheduleAcknowledgement> findAcknowledgements(Long storeId, Long proposalId, String managerUsername) {
+        storeAccessGuard.verifyOwner(storeId, managerUsername);
+        findProposal(storeId, proposalId);
+        return acknowledgementRepository.findByProposalIdOrderByIdAsc(proposalId);
+    }
+
+    // 점주: 안 본 직원에게 다시 알림. 알린 인원 수를 돌려준다
+    @Transactional
+    public int remindUnseen(Long storeId, Long proposalId, String managerUsername) {
+        List<ScheduleAcknowledgement> unseen = findAcknowledgements(storeId, proposalId, managerUsername).stream()
+                .filter(a -> a.getSeenAt() == null)
+                .toList();
+        for (ScheduleAcknowledgement a : unseen) {
+            a.remind();
+            fcmService.send(a.getEmployee().getUser(), "근무표를 확인해주세요",
+                    a.getProposal().getWeekStart() + "~" + a.getProposal().getPeriodEnd() + " 확정 근무표를 아직 안 보셨어요.");
+        }
+        return unseen.size();
+    }
+
+    // 직원이 내 근무표를 열면 확인한 것으로 본다
+    @Transactional
+    public void acknowledge(Long storeId, String username) {
+        employeeRepository.findByStoreIdAndUser_Username(storeId, username)
+                .filter(e -> e.getStatus() == EmployeeStatus.APPROVED)
+                .ifPresent(e -> acknowledgementRepository.findByEmployeeIdAndSeenAtIsNull(e.getId())
+                        .forEach(ScheduleAcknowledgement::see));
     }
 
     private ScheduleProposal findProposal(Long storeId, Long proposalId) {

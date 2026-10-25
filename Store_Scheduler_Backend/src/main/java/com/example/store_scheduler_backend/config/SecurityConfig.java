@@ -62,7 +62,10 @@ public class SecurityConfig {
                         .requestMatchers("/api/stores/*/preferences").hasRole("MANAGER")
                         .requestMatchers("/api/stores/*/tasks/my").hasRole("EMPLOYEE")
                         .requestMatchers("/api/stores/*/my-skills").hasRole("EMPLOYEE")
-                        .requestMatchers("/api/stores/*/skill-requests", "/api/stores/*/skill-matrix").hasRole("MANAGER")
+                        .requestMatchers("/api/stores/*/skill-requests", "/api/stores/*/skill-matrix",
+                                "/api/stores/*/roster", "/api/stores/*/skill-coverage").hasRole("MANAGER")
+                        .requestMatchers("/api/stores/*/me/summary").hasRole("EMPLOYEE")
+                        .requestMatchers("/api/holidays").authenticated()
                         .requestMatchers("/api/stores/*/leaves/my").hasRole("EMPLOYEE")
                         .requestMatchers(HttpMethod.GET, "/api/stores/*/leaves").hasRole("MANAGER")
                         .requestMatchers(HttpMethod.POST, "/api/stores/*/leaves").hasRole("EMPLOYEE")

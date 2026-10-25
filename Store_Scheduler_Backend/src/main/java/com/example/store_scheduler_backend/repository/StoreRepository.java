@@ -10,4 +10,5 @@ import java.util.Optional;
 public interface StoreRepository extends JpaRepository<Store, Long> {
     Optional<Store> findByStoreCode(String storeCode);
     List<Store> findByOwner_Username(String username);
+    List<Store> findByAutoGenerateTrue();
 }

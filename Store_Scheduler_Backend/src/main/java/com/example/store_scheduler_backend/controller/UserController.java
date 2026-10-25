@@ -4,6 +4,7 @@ import com.example.store_scheduler_backend.domain.EmploymentType;
 import com.example.store_scheduler_backend.domain.Industry;
 import com.example.store_scheduler_backend.domain.Role;
 import com.example.store_scheduler_backend.service.AuthService;
+import com.example.store_scheduler_backend.service.NotificationService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -15,6 +16,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @RestController
@@ -24,6 +26,43 @@ import java.util.List;
 public class UserController {
 
     private final AuthService authService;
+    private final NotificationService notificationService;
+
+    // 알림함 (최신순, 기본 50개)
+    @GetMapping("/me/notifications")
+    public ResponseEntity<NotificationsResponse> getNotifications(
+            @RequestParam(defaultValue = "50") int limit,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        String username = userDetails.getUsername();
+        return ResponseEntity.ok(new NotificationsResponse(notificationService.countUnread(username),
+                notificationService.findMine(username, limit).stream()
+                        .map(n -> new NotificationResponse(n.getId(), n.getTitle(), n.getBody(), n.getCreatedAt(), n.isRead()))
+                        .toList()));
+    }
+
+    @PostMapping("/me/notifications/{notificationId}/read")
+    public ResponseEntity<Void> markRead(
+            @PathVariable Long notificationId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        notificationService.markRead(userDetails.getUsername(), notificationId);
+        return ResponseEntity.ok().build();
+    }
+
+    // 모두 읽음
+    @PostMapping("/me/notifications/read-all")
+    public ResponseEntity<Void> markAllRead(@AuthenticationPrincipal UserDetails userDetails) {
+        notificationService.markAllRead(userDetails.getUsername());
+        return ResponseEntity.ok().build();
+    }
+
+    // 푸시 알림 켜기·끄기 (꺼도 알림함에는 쌓인다)
+    @PatchMapping("/me/notification-settings")
+    public ResponseEntity<NotificationSettingsResponse> updateNotificationSettings(
+            @RequestBody NotificationSettingsRequest request,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        return ResponseEntity.ok(new NotificationSettingsResponse(notificationService.updatePushEnabled(
+                userDetails.getUsername(), !Boolean.FALSE.equals(request.getPushEnabled()))));
+    }
 
     // 로그인 직후 어느 화면으로 보낼지 정하는 용도: 역할, 소유 매장, 합류한 매장과 승인 상태
     @GetMapping("/me")
@@ -72,6 +111,20 @@ public class UserController {
     }
 
     record TokenResponse(String token) {
+    }
+
+    @Data
+    static class NotificationSettingsRequest {
+        private Boolean pushEnabled;
+    }
+
+    record NotificationSettingsResponse(boolean pushEnabled) {
+    }
+
+    record NotificationResponse(Long id, String title, String body, LocalDateTime createdAt, boolean read) {
+    }
+
+    record NotificationsResponse(long unreadCount, List<NotificationResponse> notifications) {
     }
 
     record OwnedStore(Long id, String name, Industry industry, String storeCode) {

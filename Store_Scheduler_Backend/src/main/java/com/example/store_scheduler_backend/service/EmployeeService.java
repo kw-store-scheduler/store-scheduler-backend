@@ -46,7 +46,7 @@ public class EmployeeService {
         Employee employee = new Employee(name, phoneNumber, store, user);
         employee.fillJoinProfile(nickname, startDate, minor, employmentType);
         Employee saved = employeeRepository.save(employee);
-        fcmService.sendToDevice(store.getOwner().getDeviceToken(), "가입 요청",
+        fcmService.send(store.getOwner(), "가입 요청",
                 employee.getName() + "님이 " + store.getName() + " 가입을 요청했습니다.");
         return saved;
     }
@@ -64,8 +64,7 @@ public class EmployeeService {
         }
         employee.approve(hourlyWage, employmentType);
 
-        fcmService.sendToDevice(
-                employee.getUser().getDeviceToken(),
+        fcmService.send(employee.getUser(),
                 "가입 신청 승인",
                 store.getName() + "에서 가입 신청이 승인되었습니다."
         );
@@ -84,8 +83,7 @@ public class EmployeeService {
         }
         employee.reject();
 
-        fcmService.sendToDevice(
-                employee.getUser().getDeviceToken(),
+        fcmService.send(employee.getUser(),
                 "가입 신청 거절",
                 store.getName() + "에서 가입 신청이 거절되었습니다."
         );

@@ -102,7 +102,7 @@ public class ShiftTradeService {
             trade = new ShiftTrade(TradeType.EXCHANGE, mine, theirs.getEmployee(), theirs, recurring);
         }
         ShiftTrade saved = tradeRepository.save(trade);
-        fcmService.sendToDevice(saved.getTarget().getUser().getDeviceToken(),
+        fcmService.send(saved.getTarget().getUser(),
                 type == TradeType.HANDOVER ? "근무 넘기기 요청" : "근무 맞교환 요청",
                 me.getDisplayName() + "님이 " + mine.getWorkDate() + " " + mine.getStartTime() + " 근무를 "
                         + (type == TradeType.HANDOVER ? "넘기고 싶어 해요." : "바꾸고 싶어 해요."));
@@ -119,13 +119,13 @@ public class ShiftTradeService {
         }
         if (!accept) {
             trade.resolve(TradeStatus.DECLINED);
-            fcmService.sendToDevice(trade.getRequester().getUser().getDeviceToken(), "요청 거절",
+            fcmService.send(trade.getRequester().getUser(), "요청 거절",
                     me.getDisplayName() + "님이 근무 바꾸기를 거절했어요.");
             return trade;
         }
         requireNoBlocker(currentBlocker(trade));
         trade.peerAccept();
-        fcmService.sendToDevice(trade.getStore().getOwner().getDeviceToken(), "근무 변경 승인 필요",
+        fcmService.send(trade.getStore().getOwner(), "근무 변경 승인 필요",
                 trade.getRequester().getDisplayName() + "님과 " + me.getDisplayName() + "님의 근무 변경을 승인해주세요.");
         return trade;
     }
@@ -145,8 +145,8 @@ public class ShiftTradeService {
         }
         trade.resolve(TradeStatus.APPROVED);
         String message = trade.getRequesterDate() + " 근무 변경이 승인되어 근무표와 수당이 바뀌었어요.";
-        fcmService.sendToDevice(trade.getRequester().getUser().getDeviceToken(), "근무 변경 승인", message);
-        fcmService.sendToDevice(trade.getTarget().getUser().getDeviceToken(), "근무 변경 승인", message);
+        fcmService.send(trade.getRequester().getUser(), "근무 변경 승인", message);
+        fcmService.send(trade.getTarget().getUser(), "근무 변경 승인", message);
         return trade;
     }
 
@@ -158,7 +158,7 @@ public class ShiftTradeService {
             throw new IllegalArgumentException("이미 처리된 요청입니다.");
         }
         trade.resolve(TradeStatus.REJECTED);
-        fcmService.sendToDevice(trade.getRequester().getUser().getDeviceToken(), "근무 변경 반려", "사장님이 근무 변경을 반려했어요.");
+        fcmService.send(trade.getRequester().getUser(), "근무 변경 반려", "사장님이 근무 변경을 반려했어요.");
         return trade;
     }
 

@@ -35,6 +35,10 @@ public class Employee {
 
     private LocalDateTime requestedAt;
 
+    // 정규직 직책. 알바는 null
+    @Enumerated(EnumType.STRING)
+    private StaffPosition position;
+
     // 근로계약상 주 근무 시간 범위. 점주가 정한다
     private Integer contractMinWeeklyHours;
 
@@ -95,6 +99,15 @@ public class Employee {
 
     public boolean isMinor() {
         return Boolean.TRUE.equals(minor);
+    }
+
+    public void updatePosition(StaffPosition position) {
+        this.position = position;
+    }
+
+    // 알바이고 입사(근무 시작) 1개월 이내
+    public boolean isNewcomer(LocalDate today) {
+        return getEmploymentType() == EmploymentType.PART_TIME && startDate != null && !today.isAfter(startDate.plusMonths(1));
     }
 
     public void updateContract(Integer minWeeklyHours, Integer maxWeeklyHours) {

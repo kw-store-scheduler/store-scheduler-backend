@@ -91,7 +91,7 @@ public class SwapRequestService {
 
         SwapRequest saved = swapRequestRepository.save(new SwapRequest(schedule, reason, category, partialFrom));
         Store store = schedule.getStore();
-        fcmService.sendToDevice(store.getOwner().getDeviceToken(), "결원 요청",
+        fcmService.send(store.getOwner(), "결원 요청",
                 requester.getDisplayName() + "님이 " + schedule.getWorkDate() + " " + saved.getStartTime() + " 근무에 결원을 요청했습니다.");
         return saved;
     }
@@ -152,7 +152,7 @@ public class SwapRequestService {
                     .orElseGet(() -> new SwapOffer(request, candidate, byOwner));
             offer.resend(byOwner);
             offerRepository.save(offer);
-            fcmService.sendToDevice(candidate.getUser().getDeviceToken(), "대타 요청",
+            fcmService.send(candidate.getUser(), "대타 요청",
                     request.getWorkDate() + " " + request.getStartTime() + "~" + request.getEndTime() + " 근무 대타를 부탁받았어요.");
         }
         request.markOffered();
@@ -241,9 +241,9 @@ public class SwapRequestService {
         }
         Employee substitute = request.getSubstitute();
         request.reopen();
-        fcmService.sendToDevice(substitute.getUser().getDeviceToken(), "대타 미승인",
+        fcmService.send(substitute.getUser(), "대타 미승인",
                 request.getWorkDate() + " " + request.getStartTime() + " 대타는 사장님이 다른 방법으로 채우기로 했어요.");
-        fcmService.sendToDevice(request.getRequester().getUser().getDeviceToken(), "대타 미승인",
+        fcmService.send(request.getRequester().getUser(), "대타 미승인",
                 "사장님이 대타를 승인하지 않았어요. 다른 동료에게 요청하거나 게시판에 올려주세요.");
         return request;
     }
@@ -332,7 +332,7 @@ public class SwapRequestService {
             if (request.getStatus() == SwapStatus.OFFERED && !stillWaiting) {
                 request.reopen();
                 openShiftService.postVacancy(request);
-                fcmService.sendToDevice(request.getRequester().getUser().getDeviceToken(), "게시판으로 넘겼어요",
+                fcmService.send(request.getRequester().getUser(), "게시판으로 넘겼어요",
                         "30분 동안 대타 수락이 없어 빈 근무 게시판에 올렸어요.");
                 moved++;
             }
@@ -375,7 +375,7 @@ public class SwapRequestService {
             if (request.getStatus() == SwapStatus.OFFERED && !stillWaiting) {
                 request.reopen();
             }
-            fcmService.sendToDevice(request.getStore().getOwner().getDeviceToken(), "대타 거절",
+            fcmService.send(request.getStore().getOwner(), "대타 거절",
                     offer.getCandidate().getDisplayName() + "님이 " + request.getWorkDate() + " 근무 대타를 거절했습니다.");
             return request;
         }
@@ -393,7 +393,7 @@ public class SwapRequestService {
             openShiftService.closeFor(List.of(request.getId()), true);
         } else {
             request.awaitApproval(offer.getCandidate());
-            fcmService.sendToDevice(request.getStore().getOwner().getDeviceToken(), "대타 승인 필요",
+            fcmService.send(request.getStore().getOwner(), "대타 승인 필요",
                     offer.getCandidate().getDisplayName() + "님이 " + request.getRequester().getDisplayName() + "님의 "
                             + request.getWorkDate() + " 근무 대타를 수락했어요. 승인해주세요.");
         }

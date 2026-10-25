@@ -94,7 +94,7 @@ public class LeaveService {
             throw new IllegalArgumentException("남은 연차가 없습니다.");
         }
         LeaveRequest saved = leaveRequestRepository.save(new LeaveRequest(me, date, reason));
-        fcmService.sendToDevice(me.getStore().getOwner().getDeviceToken(), "연차 신청",
+        fcmService.send(me.getStore().getOwner(), "연차 신청",
                 me.getDisplayName() + "님이 " + date + " 연차를 신청했습니다.");
         return saved;
     }
@@ -121,7 +121,7 @@ public class LeaveService {
                     dayOffRequestRepository.flush();
                 });
         dayOffRequestRepository.save(new DayOffRequest(employee, leave.getDate(), DayOffType.MUST, "연차"));
-        fcmService.sendToDevice(employee.getUser().getDeviceToken(), "연차 승인", leave.getDate() + " 연차가 승인되었습니다.");
+        fcmService.send(employee.getUser(), "연차 승인", leave.getDate() + " 연차가 승인되었습니다.");
         return leave;
     }
 
@@ -130,7 +130,7 @@ public class LeaveService {
         storeAccessGuard.verifyOwner(storeId, managerUsername);
         LeaveRequest leave = findPendingLeave(storeId, leaveId);
         leave.reject();
-        fcmService.sendToDevice(leave.getEmployee().getUser().getDeviceToken(), "연차 반려", leave.getDate() + " 연차가 반려되었습니다.");
+        fcmService.send(leave.getEmployee().getUser(), "연차 반려", leave.getDate() + " 연차가 반려되었습니다.");
         return leave;
     }
 

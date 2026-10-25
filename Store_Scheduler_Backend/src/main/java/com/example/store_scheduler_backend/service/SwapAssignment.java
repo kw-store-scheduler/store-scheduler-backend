@@ -26,9 +26,9 @@ public class SwapAssignment {
         closePendingOffers(request);
         String message = request.getWorkDate() + " " + request.getStartTime() + " 근무를 "
                 + substitute.getDisplayName() + "님이 대신하기로 했습니다.";
-        fcmService.sendToDevice(request.getRequester().getUser().getDeviceToken(), "대타 확정", message);
-        fcmService.sendToDevice(request.getStore().getOwner().getDeviceToken(), "대타 확정", message);
-        fcmService.sendToDevice(substitute.getUser().getDeviceToken(), "대타 확정",
+        fcmService.send(request.getRequester().getUser(), "대타 확정", message);
+        fcmService.send(request.getStore().getOwner(), "대타 확정", message);
+        fcmService.send(substitute.getUser(), "대타 확정",
                 request.getWorkDate() + " " + request.getStartTime() + "~" + request.getEndTime() + " 근무가 내 근무표에 추가되었습니다.");
     }
 

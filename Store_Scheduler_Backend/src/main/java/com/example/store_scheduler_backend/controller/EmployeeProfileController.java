@@ -9,6 +9,7 @@ import com.example.store_scheduler_backend.domain.FixedSchedule;
 import com.example.store_scheduler_backend.domain.FixedScheduleCategory;
 import com.example.store_scheduler_backend.domain.SkillLevel;
 import com.example.store_scheduler_backend.domain.SkillWindowRequirement;
+import com.example.store_scheduler_backend.domain.StaffPosition;
 import com.example.store_scheduler_backend.service.EmployeeProfileService;
 import com.example.store_scheduler_backend.service.PreferenceService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -92,7 +93,8 @@ public class EmployeeProfileController {
             @AuthenticationPrincipal UserDetails userDetails) {
         return ResponseEntity.ok(ProfileResponse.from(profileService.updateProfile(storeId, employeeId, request.getPermissions(),
                 request.getProbationUntil(), Boolean.TRUE.equals(request.getClearProbation()),
-                request.getContractMinWeeklyHours(), request.getContractMaxWeeklyHours(), userDetails.getUsername())));
+                request.getContractMinWeeklyHours(), request.getContractMaxWeeklyHours(), request.getPosition(),
+                userDetails.getUsername())));
     }
 
     // 관리자: 등급 확정 (신청 승인 또는 직접 지정). NONE이면 보유 스킬에서 뺀다
@@ -179,6 +181,8 @@ public class EmployeeProfileController {
         // 근로계약 주 근무 시간 범위 (둘 다 보내야 바뀐다)
         private Integer contractMinWeeklyHours;
         private Integer contractMaxWeeklyHours;
+        // 정규직 직책 (MANAGER·SENIOR·JUNIOR)
+        private StaffPosition position;
     }
 
     @Data
@@ -250,13 +254,15 @@ public class EmployeeProfileController {
         }
     }
 
-    record ProfileResponse(Long employeeId, String name, String displayName, EmploymentType employmentType, LocalDate startDate,
+    record ProfileResponse(Long employeeId, String name, String displayName, EmploymentType employmentType,
+                           StaffPosition position, LocalDate startDate,
                            Integer hourlyWage, Integer contractMinWeeklyHours, Integer contractMaxWeeklyHours,
                            LocalDate probationUntil, int promiseScore, List<SkillStateResponse> skills,
                            List<PermissionResponse> permissions, List<HistoryResponse> history) {
         static ProfileResponse from(EmployeeProfileService.Profile p) {
             Employee e = p.employee();
-            return new ProfileResponse(e.getId(), e.getName(), e.getDisplayName(), e.getEmploymentType(), e.getStartDate(),
+            return new ProfileResponse(e.getId(), e.getName(), e.getDisplayName(), e.getEmploymentType(), e.getPosition(),
+                    e.getStartDate(),
                     e.getHourlyWage(), e.getContractMinWeeklyHours(), e.getContractMaxWeeklyHours(), e.getProbationUntil(),
                     e.getPromiseScore(),
                     p.skills().stream().map(SkillStateResponse::from).toList(), permissionStates(e),
