@@ -11,3 +11,8 @@ spring:
 jwt:
   secret: test-secret-key-for-local-junit-only-0123456789
   expiration_time: 3600000
+
+scheduler:
+  jobs:
+    # 테스트 중 백그라운드 작업이 데이터를 바꾸지 않도록 끈다
+    enabled: false

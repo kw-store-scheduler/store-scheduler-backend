@@ -3,6 +3,7 @@ package com.example.store_scheduler_backend.controller;
 import com.example.store_scheduler_backend.domain.Attendance;
 import com.example.store_scheduler_backend.domain.EmploymentType;
 import com.example.store_scheduler_backend.domain.Schedule;
+import com.example.store_scheduler_backend.domain.SwapOffer;
 import com.example.store_scheduler_backend.domain.SwapRequest;
 import com.example.store_scheduler_backend.service.HomeService;
 import com.example.store_scheduler_backend.service.PayrollService;
@@ -76,7 +77,7 @@ public class HomeController {
                 home.coworkers(),
                 home.todayAttendance() != null ? AttendanceSummary.from(home.todayAttendance()) : null,
                 home.week().stream().map(DayScheduleResponse::from).toList(),
-                home.swapOffers().stream().map(r -> SwapOfferResponse.from(r, wage)).toList(),
+                home.swapOffers().stream().map(o -> SwapOfferResponse.from(o, wage)).toList(),
                 new MonthlyPayResponse(pay.getTotalHours(), pay.getRegularWage(), pay.getWeeklyHolidayPay(), pay.getTotalPay()),
                 PreferenceStatusResponse.from(home.nextMonthPreferences()),
                 home.leaveBalance() != null ? new LeaveBalanceResponse(home.leaveBalance().entitled(),
@@ -137,14 +138,15 @@ public class HomeController {
         }
     }
 
-    record SwapOfferResponse(Long requestId, LocalDate workDate, LocalTime startTime, LocalTime endTime,
+    record SwapOfferResponse(Long offerId, Long requestId, LocalDate workDate, LocalTime startTime, LocalTime endTime,
                              String requesterName, long expectedPay) {
-        static SwapOfferResponse from(SwapRequest r, int wage) {
+        static SwapOfferResponse from(SwapOffer o, int wage) {
+            SwapRequest r = o.getSwapRequest();
             long minutes = Duration.between(r.getStartTime(), r.getEndTime()).toMinutes();
             if (minutes <= 0) {
                 minutes += 24 * 60;
             }
-            return new SwapOfferResponse(r.getId(), r.getWorkDate(), r.getStartTime(), r.getEndTime(),
+            return new SwapOfferResponse(o.getId(), r.getId(), r.getWorkDate(), r.getStartTime(), r.getEndTime(),
                     r.getRequester().getDisplayName(), Math.round(minutes / 60.0 * wage));
         }
     }

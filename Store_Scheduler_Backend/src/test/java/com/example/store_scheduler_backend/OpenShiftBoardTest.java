@@ -4,12 +4,14 @@ import com.example.store_scheduler_backend.domain.Availability;
 import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.Role;
 import com.example.store_scheduler_backend.domain.Schedule;
+import com.example.store_scheduler_backend.domain.Skill;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.domain.SwapStatus;
 import com.example.store_scheduler_backend.domain.User;
 import com.example.store_scheduler_backend.repository.AvailabilityRepository;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
 import com.example.store_scheduler_backend.repository.ScheduleRepository;
+import com.example.store_scheduler_backend.repository.SkillRepository;
 import com.example.store_scheduler_backend.repository.StoreRepository;
 import com.example.store_scheduler_backend.repository.SwapRequestRepository;
 import com.example.store_scheduler_backend.repository.UserRepository;
@@ -53,6 +55,7 @@ class OpenShiftBoardTest {
     @Autowired AvailabilityRepository availabilityRepository;
     @Autowired ScheduleRepository scheduleRepository;
     @Autowired SwapRequestRepository swapRequestRepository;
+    @Autowired SkillRepository skillRepository;
 
     private Store store;
     private Employee requester;
@@ -70,8 +73,13 @@ class OpenShiftBoardTest {
     }
 
     @Test
-    void 결원을_신고하면_게시판에_올라가고_지원자를_승인하면_근무가_넘어간다() throws Exception {
+    void 결원을_게시판에_올리면_지원자를_승인해_근무가_넘어간다() throws Exception {
         long requestId = reportAbsence();
+        assertThat(body(as("yuna", get("/api/stores/{storeId}/open-shifts", store.getId()))).get("items").size())
+                .as("신고만 하면 아직 게시판에 없다").isZero();
+        as("inho", post("/api/stores/{storeId}/swap-requests/{id}/board", store.getId(), requestId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.notifiedCount").value(2));
 
         JsonNode board = body(as("yuna", get("/api/stores/{storeId}/open-shifts", store.getId())));
         assertThat(board.get("items").size()).isEqualTo(1);
@@ -111,8 +119,9 @@ class OpenShiftBoardTest {
     }
 
     @Test
-    void 결원_요청을_취소하면_게시판_글도_내려가고_일괄_요청은_후보에게_다시_알린다() throws Exception {
+    void 결원_요청을_취소하면_게시판_글도_내려가고_일괄_요청은_후보_전원에게_보낸다() throws Exception {
         long requestId = reportAbsence();
+        as("owner", post("/api/stores/{storeId}/swap-requests/{id}/board", store.getId(), requestId)).andExpect(status().isOk());
 
         as("owner", post("/api/stores/{storeId}/swap-requests/{id}/broadcast", store.getId(), requestId))
                 .andExpect(status().isOk())
@@ -143,7 +152,46 @@ class OpenShiftBoardTest {
         assertThat(scheduleRepository.findByEmployeeIdAndWorkDateBetweenOrderByWorkDateAsc(helper.getId(), TOMORROW, TOMORROW))
                 .singleElement().satisfies(s -> assertThat(s.getStartTime()).isEqualTo(LocalTime.of(12, 0)));
         as("owner", get("/api/stores/{storeId}/open-shifts/{id}/applications", store.getId(), openShiftId))
-                .andExpect(jsonPath("$[1].status").value("REJECTED"));
+                .andExpect(jsonPath("$[?(@.employeeName=='지수')].status").value("REJECTED"))
+                .andExpect(jsonPath("$[?(@.employeeName=='유나')].status").value("APPROVED"));
+    }
+
+    @Test
+    void 필요_역량이_없거나_마감이_지나면_지원할_수_없고_지원자는_이번_달_추가_근무가_적은_순이다() throws Exception {
+        Skill service = skillRepository.save(new Skill("응대", store));
+        helper.addSkill(service);
+        LocalDate d1 = java.time.YearMonth.now().plusMonths(1).atDay(3);
+        LocalDate d2 = d1.plusDays(1);
+
+        long skillShift = extra(d1, "{\"requiredSkillId\":" + service.getId() + "}");
+        JsonNode thirdItem = body(as("third", get("/api/stores/{storeId}/open-shifts", store.getId()))).get("items").get(0);
+        assertThat(thirdItem.get("blocker").asText()).isEqualTo("필요 역량(응대) 없음");
+        assertThat(thirdItem.get("requiredSkill").asText()).isEqualTo("응대");
+        long first = body(as("yuna", post("/api/stores/{storeId}/open-shifts/{id}/applications", store.getId(), skillShift))).get("id").asLong();
+        as("owner", post("/api/stores/{storeId}/open-shifts/{id}/applications/{aid}/approve", store.getId(), skillShift, first))
+                .andExpect(status().isOk());
+
+        long closed = extra(d2, "{\"applyDeadline\":\"" + LocalDate.now().minusDays(1) + "T18:00:00\"}");
+        as("third", post("/api/stores/{storeId}/open-shifts/{id}/applications", store.getId(), closed))
+                .andExpect(status().isBadRequest());
+
+        long open = extra(d2, "{}");
+        as("yuna", post("/api/stores/{storeId}/open-shifts/{id}/applications", store.getId(), open)).andExpect(status().isOk());
+        as("third", post("/api/stores/{storeId}/open-shifts/{id}/applications", store.getId(), open)).andExpect(status().isOk());
+        as("owner", get("/api/stores/{storeId}/open-shifts/{id}/applications", store.getId(), open))
+                .andExpect(jsonPath("$[0].employeeName").value("지수"))
+                .andExpect(jsonPath("$[0].monthExtraCount").value(0))
+                .andExpect(jsonPath("$[1].employeeName").value("유나"))
+                .andExpect(jsonPath("$[1].monthExtraCount").value(1))
+                .andExpect(jsonPath("$[1].weekHours").exists());
+    }
+
+    private long extra(LocalDate date, String extraFields) throws Exception {
+        String fields = extraFields.equals("{}") ? "" : "," + extraFields.substring(1, extraFields.length() - 1);
+        return body(as("owner", post("/api/stores/{storeId}/open-shifts", store.getId())
+                .contentType("application/json")
+                .content("{\"workDate\":\"" + date + "\",\"startTime\":\"12:00\",\"endTime\":\"14:00\",\"title\":\"피크\"" + fields + "}")))
+                .get("id").asLong();
     }
 
     private long reportAbsence() throws Exception {

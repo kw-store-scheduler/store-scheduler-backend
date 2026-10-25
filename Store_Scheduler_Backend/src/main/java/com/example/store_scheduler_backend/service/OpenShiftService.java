@@ -2,16 +2,21 @@ package com.example.store_scheduler_backend.service;
 
 import com.example.store_scheduler_backend.domain.ApplicationStatus;
 import com.example.store_scheduler_backend.domain.Employee;
+import com.example.store_scheduler_backend.domain.EmployeeStatus;
 import com.example.store_scheduler_backend.domain.OpenShift;
 import com.example.store_scheduler_backend.domain.OpenShiftKind;
 import com.example.store_scheduler_backend.domain.OpenShiftStatus;
 import com.example.store_scheduler_backend.domain.Schedule;
 import com.example.store_scheduler_backend.domain.ShiftApplication;
+import com.example.store_scheduler_backend.domain.Skill;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.domain.SwapRequest;
+import com.example.store_scheduler_backend.domain.SwapStatus;
+import com.example.store_scheduler_backend.repository.EmployeeRepository;
 import com.example.store_scheduler_backend.repository.OpenShiftRepository;
 import com.example.store_scheduler_backend.repository.ScheduleRepository;
 import com.example.store_scheduler_backend.repository.ShiftApplicationRepository;
+import com.example.store_scheduler_backend.repository.SkillRepository;
 import com.example.store_scheduler_backend.repository.SwapRequestRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -20,9 +25,12 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.YearMonth;
 import java.time.temporal.TemporalAdjusters;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -37,11 +45,14 @@ public class OpenShiftService {
 
     private final OpenShiftRepository openShiftRepository;
     private final ShiftApplicationRepository applicationRepository;
-    private final SwapRequestRepository swapRequestRepository;
     private final ScheduleRepository scheduleRepository;
     private final StoreAccessGuard storeAccessGuard;
     private final SubstituteFinder substituteFinder;
     private final FcmService fcmService;
+    private final SwapAssignment swapAssignment;
+    private final SkillRepository skillRepository;
+    private final EmployeeRepository employeeRepository;
+    private final SwapRequestRepository swapRequestRepository;
 
     // eligible·blocker·expectedPay·myStatus는 직원이 볼 때만 채운다
     public record BoardItem(OpenShift openShift, int applicantCount, Boolean eligible, String blocker, Long expectedPay,
@@ -51,32 +62,28 @@ public class OpenShiftService {
     public record Board(List<BoardItem> items, Integer myWeekDays, Integer myWeekHours) {
     }
 
+    // 점주 지원자 목록. 이번 달 추가 근무가 적은 순 → 이번 주 근무가 적은 순
+    // weekHours는 이 근무를 포함한 이번 주 시간, 주 40시간을 넘는 부분은 연장근무로 50% 가산 (상시 5인 이상)
+    public record Applicant(ShiftApplication application, int monthExtraCount, double weekHours, long expectedPay,
+                            boolean overtime) {
+    }
+
+    private static final int WEEKLY_REGULAR_MINUTES = 40 * 60;
+    private static final int OVERTIME_EMPLOYEE_THRESHOLD = 5;
+
     public record Broadcast(OpenShift openShift, int notifiedCount) {
     }
 
-    // 결원 요청이 들어오면 게시판에 올리고 대신할 수 있는 직원들에게 알린다
+    // 결원을 게시판에 올리고 대신할 수 있는 직원들에게 알린다. 이미 올라가 있으면 그 글을 돌려준다
     @Transactional
     public Broadcast postVacancy(SwapRequest request) {
+        Optional<OpenShift> existing = openShiftRepository
+                .findBySwapRequestIdInAndStatus(List.of(request.getId()), OpenShiftStatus.OPEN).stream().findFirst();
+        if (existing.isPresent()) {
+            return new Broadcast(existing.get(), 0);
+        }
         OpenShift openShift = openShiftRepository.save(OpenShift.vacancy(request));
         return new Broadcast(openShift, notifyEligible(openShift));
-    }
-
-    // 점주: 후보 전체에게 다시 알림. 게시판 글이 없으면 새로 올린다
-    @Transactional
-    public Broadcast broadcast(Long storeId, Long swapRequestId, String managerUsername) {
-        storeAccessGuard.verifyOwner(storeId, managerUsername);
-        SwapRequest request = swapRequestRepository.findById(swapRequestId)
-                .filter(r -> r.getStore().getId().equals(storeId))
-                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 결원 요청입니다."));
-        if (!request.isActive()) {
-            throw new IllegalArgumentException("이미 처리된 결원 요청입니다.");
-        }
-        Optional<OpenShift> existing = openShiftRepository
-                .findBySwapRequestIdInAndStatus(List.of(swapRequestId), OpenShiftStatus.OPEN).stream().findFirst();
-        if (existing.isEmpty()) {
-            return postVacancy(request);
-        }
-        return new Broadcast(existing.get(), notifyEligible(existing.get()));
     }
 
     // 결원 요청이 다른 경로(지정 대타 수락, 취소, 근무표 교체)로 끝나면 게시판 글도 닫는다
@@ -97,15 +104,20 @@ public class OpenShiftService {
 
     @Transactional
     public OpenShift createExtra(Long storeId, LocalDate workDate, LocalTime startTime, LocalTime endTime, String title,
-                                 String note, int headcount, String managerUsername) {
+                                 String note, int headcount, Long requiredSkillId, LocalDateTime applyDeadline,
+                                 String managerUsername) {
         Store store = storeAccessGuard.verifyOwner(storeId, managerUsername);
+        Skill requiredSkill = requiredSkillId == null ? null : skillRepository.findById(requiredSkillId)
+                .filter(sk -> sk.getStore().getId().equals(storeId))
+                .orElseThrow(() -> new IllegalArgumentException("해당 매장의 스킬이 아닙니다: " + requiredSkillId));
         if (workDate.isBefore(LocalDate.now())) {
             throw new IllegalArgumentException("지난 날짜에는 모집 글을 올릴 수 없습니다.");
         }
         if (headcount < 1) {
             throw new IllegalArgumentException("모집 인원은 1명 이상이어야 합니다.");
         }
-        OpenShift openShift = openShiftRepository.save(OpenShift.extra(store, workDate, startTime, endTime, title, note, headcount));
+        OpenShift openShift = openShiftRepository.save(OpenShift.extra(store, workDate, startTime, endTime, title, note,
+                headcount, requiredSkill, applyDeadline));
         notifyEligible(openShift);
         return openShift;
     }
@@ -143,15 +155,14 @@ public class OpenShiftService {
         List<BoardItem> items = open.stream()
                 .filter(o -> !isOwnVacancy(o, me))
                 .map(o -> {
-                    Optional<SubstituteFinder.Candidate> candidate = candidateOf(o, me);
+                    Optional<String> blocker = blockerFor(o, me);
                     ApplicationStatus myStatus = applicationsByShift.getOrDefault(o.getId(), List.of()).stream()
                             .filter(a -> a.getEmployee().getId().equals(me.getId()))
                             .map(ShiftApplication::getStatus)
                             .findFirst()
                             .orElse(null);
-                    boolean eligible = candidate.map(SubstituteFinder.Candidate::eligible).orElse(false);
-                    String blocker = eligible ? null : candidate.map(c -> c.reasons().get(0)).orElse("지원할 수 없는 근무");
-                    return new BoardItem(o, countApplied(applicationsByShift.get(o.getId())), eligible, blocker,
+                    return new BoardItem(o, countApplied(applicationsByShift.get(o.getId())), blocker.isEmpty(),
+                            blocker.orElse(null),
                             Math.round(minutes(o.getStartTime(), o.getEndTime()) / 60.0 * wage), myStatus);
                 })
                 .toList();
@@ -171,10 +182,9 @@ public class OpenShiftService {
         if (isOwnVacancy(openShift, me)) {
             throw new IllegalArgumentException("본인이 낸 결원에는 지원할 수 없습니다.");
         }
-        SubstituteFinder.Candidate candidate = candidateOf(openShift, me)
-                .orElseThrow(() -> new IllegalArgumentException("지원할 수 없는 근무입니다."));
-        if (!candidate.eligible()) {
-            throw new IllegalArgumentException("지원할 수 없는 근무입니다: " + candidate.reasons().get(0));
+        Optional<String> blocker = blockerFor(openShift, me);
+        if (blocker.isPresent()) {
+            throw new IllegalArgumentException("지원할 수 없는 근무입니다: " + blocker.get());
         }
         Optional<ShiftApplication> existing = applicationRepository.findByOpenShiftIdAndEmployeeId(openShiftId, me.getId());
         if (existing.isPresent() && existing.get().getStatus() == ApplicationStatus.APPLIED) {
@@ -197,10 +207,58 @@ public class OpenShiftService {
         application.withdraw();
     }
 
-    public List<ShiftApplication> findApplications(Long storeId, Long openShiftId, String managerUsername) {
+    public List<Applicant> findApplications(Long storeId, Long openShiftId, String managerUsername) {
         storeAccessGuard.verifyOwner(storeId, managerUsername);
-        findInStore(storeId, openShiftId);
-        return applicationRepository.findByOpenShiftIdOrderByAppliedAtAsc(openShiftId);
+        OpenShift openShift = findInStore(storeId, openShiftId);
+        boolean overtimeApplies = employeeRepository.countByStoreIdAndStatus(storeId, EmployeeStatus.APPROVED)
+                >= OVERTIME_EMPLOYEE_THRESHOLD;
+        long shiftMinutes = minutes(openShift.getStartTime(), openShift.getEndTime());
+        LocalDate weekStart = openShift.getWorkDate().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        YearMonth month = YearMonth.from(openShift.getWorkDate());
+        return applicationRepository.findByOpenShiftIdOrderByAppliedAtAsc(openShiftId).stream()
+                .map(a -> {
+                    Employee e = a.getEmployee();
+                    long weekMinutes = scheduleRepository.findByEmployeeIdAndWorkDateBetweenOrderByWorkDateAsc(
+                                    e.getId(), weekStart, weekStart.plusDays(6)).stream()
+                            .mapToLong(s -> minutes(s.getStartTime(), s.getEndTime()))
+                            .sum() + shiftMinutes;
+                    long overtimeMinutes = overtimeApplies ? Math.min(shiftMinutes, Math.max(0, weekMinutes - WEEKLY_REGULAR_MINUTES)) : 0;
+                    int wage = e.getHourlyWage() != null ? e.getHourlyWage() : 0;
+                    long pay = Math.round(shiftMinutes / 60.0 * wage + overtimeMinutes / 60.0 * wage * 0.5);
+                    return new Applicant(a, monthExtraCount(e, month), Math.round(weekMinutes / 6.0) / 10.0, pay,
+                            overtimeMinutes > 0);
+                })
+                .sorted(Comparator.comparing((Applicant x) -> x.application().getStatus() != ApplicationStatus.APPLIED)
+                        .thenComparingInt(Applicant::monthExtraCount)
+                        .thenComparingDouble(Applicant::weekHours))
+                .toList();
+    }
+
+    // 게시판 승인과 대타 확정으로 이번 달에 추가로 맡은 근무 수
+    private int monthExtraCount(Employee employee, YearMonth month) {
+        long fromBoard = applicationRepository.findByEmployeeIdAndStatus(employee.getId(), ApplicationStatus.APPROVED).stream()
+                .filter(a -> a.getOpenShift().getKind() == OpenShiftKind.EXTRA
+                        && YearMonth.from(a.getOpenShift().getWorkDate()).equals(month))
+                .count();
+        long asSubstitute = swapRequestRepository.findBySubstituteIdAndStatusAndWorkDateBetween(employee.getId(),
+                SwapStatus.ACCEPTED, month.atDay(1), month.atEndOfMonth()).size();
+        return (int) (fromBoard + asSubstitute);
+    }
+
+    // 지원 마감, 필요 역량, 근무 규칙(휴무·가용 시간·하루 1교대·주 52시간·연속 근무·미성년자) 순으로 본다
+    private Optional<String> blockerFor(OpenShift openShift, Employee employee) {
+        if (openShift.isPastDeadline(LocalDateTime.now())) {
+            return Optional.of("지원 마감");
+        }
+        Skill required = openShift.getRequiredSkill();
+        if (required != null && employee.getSkills().stream().noneMatch(sk -> sk.getId().equals(required.getId()))) {
+            return Optional.of("필요 역량(" + required.getName() + ") 없음");
+        }
+        Optional<SubstituteFinder.Candidate> candidate = candidateOf(openShift, employee);
+        if (candidate.isEmpty()) {
+            return Optional.of("지원할 수 없는 근무");
+        }
+        return candidate.get().eligible() ? Optional.empty() : Optional.of(candidate.get().reasons().get(0));
     }
 
     // 결원이면 그 근무 담당자를 바꾸고, 추가 모집이면 근무를 새로 만든다. 모집 인원이 차면 나머지 지원자는 거절
@@ -219,12 +277,8 @@ public class OpenShiftService {
 
         application.approve();
         if (openShift.getKind() == OpenShiftKind.VACANCY) {
-            SwapRequest request = openShift.getSwapRequest();
-            request.offer(applicant);
-            request.accept();
+            swapAssignment.assign(openShift.getSwapRequest(), applicant);
             openShift.fill();
-            fcmService.sendToDevice(request.getRequester().getUser().getDeviceToken(), "대타 확정",
-                    request.getWorkDate() + " " + request.getStartTime() + " 근무를 " + applicant.getDisplayName() + "님이 대신합니다.");
         } else {
             Schedule schedule = new Schedule();
             schedule.setStore(openShift.getStore());

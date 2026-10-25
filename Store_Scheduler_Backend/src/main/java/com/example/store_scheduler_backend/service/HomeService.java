@@ -8,12 +8,14 @@ import com.example.store_scheduler_backend.domain.Schedule;
 import com.example.store_scheduler_backend.domain.Shift;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.domain.SwapRequest;
-import com.example.store_scheduler_backend.domain.SwapStatus;
+import com.example.store_scheduler_backend.domain.OfferStatus;
+import com.example.store_scheduler_backend.domain.SwapOffer;
 import com.example.store_scheduler_backend.repository.AttendanceRepository;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
 import com.example.store_scheduler_backend.repository.PreferenceSubmissionRepository;
 import com.example.store_scheduler_backend.repository.ScheduleRepository;
 import com.example.store_scheduler_backend.repository.ShiftRepository;
+import com.example.store_scheduler_backend.repository.SwapOfferRepository;
 import com.example.store_scheduler_backend.repository.SwapRequestRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -43,6 +45,7 @@ public class HomeService {
     private final ScheduleRepository scheduleRepository;
     private final ShiftRepository shiftRepository;
     private final SwapRequestRepository swapRequestRepository;
+    private final SwapOfferRepository offerRepository;
     private final AttendanceRepository attendanceRepository;
     private final PayrollService payrollService;
     private final PreferenceSubmissionRepository submissionRepository;
@@ -70,7 +73,7 @@ public class HomeService {
     }
 
     public record WorkerHome(Store store, Employee employee, LocalDate date, DaySchedule today, List<String> coworkers,
-                             Attendance todayAttendance, List<DaySchedule> week, List<SwapRequest> swapOffers,
+                             Attendance todayAttendance, List<DaySchedule> week, List<SwapOffer> swapOffers,
                              PayrollService.EmployeePayroll monthlyPay, PreferenceStatus nextMonthPreferences,
                              LeaveService.Balance leaveBalance, Notice latestNotice) {
     }
@@ -132,9 +135,9 @@ public class HomeService {
                         .map(s -> s.getEmployee().getDisplayName())
                         .sorted()
                         .toList();
-        List<SwapRequest> swapOffers = swapRequestRepository.findByStoreIdOrderByCreatedAtDesc(storeId).stream()
-                .filter(r -> r.getStatus() == SwapStatus.OFFERED)
-                .filter(r -> r.getSubstitute() != null && r.getSubstitute().getId().equals(employee.getId()))
+        List<SwapOffer> swapOffers = offerRepository.findByCandidateIdAndStatusOrderBySentAtDesc(employee.getId(), OfferStatus.SENT)
+                .stream()
+                .filter(o -> o.getSwapRequest().isActive())
                 .toList();
 
         return new WorkerHome(employee.getStore(), employee, date, today, coworkers,

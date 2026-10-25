@@ -36,6 +36,7 @@ public class ScheduleProposalService {
     private final StoreAccessGuard storeAccessGuard;
     private final FcmService fcmService;
     private final SwapRequestService swapRequestService;
+    private final ShiftTradeService shiftTradeService;
     private final ObjectMapper objectMapper;
 
     public ScheduleProposalResponse getProposal(Long storeId, Long proposalId, String managerUsername) {
@@ -81,6 +82,7 @@ public class ScheduleProposalService {
         List<Schedule> replaced = scheduleRepository.findByStoreIdAndWorkDateBetween(
                 storeId, proposal.getWeekStart(), proposal.getPeriodEnd());
         swapRequestService.detachSchedules(replaced);
+        shiftTradeService.detachSchedules(replaced.stream().map(Schedule::getId).toList());
         scheduleRepository.deleteAll(replaced);
         scheduleRepository.saveAll(schedules);
         proposal.confirm(candidateIndex);
