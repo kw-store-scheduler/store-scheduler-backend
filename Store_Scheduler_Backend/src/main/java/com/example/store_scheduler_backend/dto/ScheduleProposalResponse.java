@@ -27,11 +27,13 @@ public class ScheduleProposalResponse {
     private List<Shortage> shortages;
     private List<Candidate> candidates;
     private Notice notice;
+    // 주간 생성이면 weekStart + 6일, 월간 생성이면 그달 말일
+    private LocalDate periodEnd;
 
-    public static ScheduleProposalResponse failed(String status, LocalDate weekStart) {
+    public static ScheduleProposalResponse failed(String status, LocalDate weekStart, LocalDate periodEnd) {
         return new ScheduleProposalResponse(null, false, status,
                 "현재 조건으로는 근무표를 생성할 수 없습니다. 직원 가용 시간이나 근무 시간대 설정을 확인해주세요.",
-                weekStart, null, null, null, List.of(), List.of(), null);
+                weekStart, null, null, null, List.of(), List.of(), null, periodEnd);
     }
 
     // 관리자가 확정 전에 꼭 봐야 할 건수. 균형 해(0번) 기준
@@ -67,16 +69,26 @@ public class ScheduleProposalResponse {
         return message;
     }
 
-    // label: 어떤 기준으로 만든 안인지 (균형 / 공평성 우선 / 인건비 우선, 결과가 같으면 합쳐서 표시)
+    // label: 어떤 기준으로 만든 안인지 (공정 우선 / 인건비 우선 / 희망 우선, 결과가 같으면 합쳐서 표시)
     // changedFromCurrent: 생성 시점의 확정 근무표와 비교해 달라진 칸 수 (추가 + 삭제)
     public record Candidate(int index, String label, String description, long estimatedCost, int changedFromCurrent,
                             List<EmployeeSummary> employees, List<Assignment> assignments,
-                            List<DayOffViolation> dayOffViolations) {
+                            List<DayOffViolation> dayOffViolations, Metrics metrics) {
+    }
+
+    // 후보안 비교 화면의 지표. 희망을 제출한 직원이 없으면 preferenceRate는 null
+    // preferenceHonored: 선호 칸에 배정됐거나, 그날 선호 칸이 없어 가능 칸에 배정된 근무 수
+    // weekendGap: 직원 간 주말 근무 횟수 최대 차이, laborLawViolations: 주 52시간·연속 5일·미성년자 제한 위반 수
+    // minStaffCoverage: 최소 인원을 채운 근무 칸 비율(%), warnings: 최소는 채웠지만 목표 인원에 못 미친 칸
+    public record Metrics(Integer preferenceTotal, Integer preferenceHonored, Double preferenceRate, int weekendGap,
+                          int laborLawViolations, double minStaffCoverage, List<String> warnings) {
     }
 
     // 휴무를 신청한 날에 배정된 근무. 필수 휴무면 그 근무를 대신할 수 있는 예비 대타(backups)를 함께 준다
+    // fallbacks: 희망 휴무를 낸 직원이 정해 둔 대안 순서
     public record DayOffViolation(Long employeeId, String employeeName, LocalDate date, String type,
-                                  String shiftName, LocalTime startTime, LocalTime endTime, List<Backup> backups) {
+                                  String shiftName, LocalTime startTime, LocalTime endTime, List<Backup> backups,
+                                  List<String> fallbacks) {
     }
 
     // 가능한 사람이 없으면 eligible=false인 직원이 사유와 함께 온다

@@ -1,9 +1,11 @@
 package com.example.store_scheduler_backend.controller;
 
+import com.example.store_scheduler_backend.domain.Industry;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.service.StoreService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Max;
 import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import lombok.AllArgsConstructor;
@@ -14,6 +16,8 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.LocalTime;
+import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -29,8 +33,24 @@ public class StoreController {
     public ResponseEntity<StoreCreateResponse> createStore(
             @Valid @RequestBody StoreCreateRequest request,
             @AuthenticationPrincipal UserDetails userDetails) {
-        Store store = storeService.registerStore(request.getName(), request.getAddress(), userDetails.getUsername());
+        Store store = storeService.registerStore(request.getName(), request.getAddress(), request.getIndustry(),
+                userDetails.getUsername());
         return ResponseEntity.ok(new StoreCreateResponse(store.getId(), store.getStoreCode()));
+    }
+
+    // 매장 등록 화면에서 업종별로 미리 만들어지는 스킬·교대를 보여주는 용도
+    @GetMapping("/industries")
+    public ResponseEntity<List<IndustryResponse>> getIndustries() {
+        return ResponseEntity.ok(Arrays.stream(Industry.values()).map(IndustryResponse::from).toList());
+    }
+
+    // 직원: 합류 전 매장 코드 확인
+    @GetMapping("/code/{storeCode}")
+    public ResponseEntity<StorePreviewResponse> previewByCode(@PathVariable String storeCode) {
+        StoreService.StorePreview preview = storeService.previewByCode(storeCode);
+        Store store = preview.store();
+        return ResponseEntity.ok(new StorePreviewResponse(store.getId(), store.getName(), store.getIndustry(),
+                store.getIndustry().getLabel(), store.getAddress(), preview.employeeCount()));
     }
 
     @PostMapping("/{storeId}/reissue-code")
@@ -41,7 +61,8 @@ public class StoreController {
         return ResponseEntity.ok(new StoreCreateResponse(storeId, newCode));
     }
 
-    // 관리자: 매장 설정 (guaranteeMustDayOff: 대신할 사람이 없어도 필수 휴무 보장, customersPerStaff: 인력 제안용 1인당 객수). 보낸 항목만 변경
+    // 관리자: 매장 설정 (guaranteeMustDayOff: 대신할 사람이 없어도 필수 휴무 보장, customersPerStaff: 인력 제안용 1인당 객수,
+    // allowSplitShift: 하루 2교대 쪼개기 근무, preferenceDeadlineDay: 다음 달 희망 제출 마감일). 보낸 항목만 변경
     @PatchMapping("/{storeId}/settings")
     public ResponseEntity<StoreResponse> updateSettings(
             @PathVariable Long storeId,
@@ -49,7 +70,7 @@ public class StoreController {
             @AuthenticationPrincipal UserDetails userDetails) {
         return ResponseEntity.ok(StoreResponse.from(
                 storeService.updateSettings(storeId, request.getGuaranteeMustDayOff(), request.getCustomersPerStaff(),
-                        userDetails.getUsername())));
+                        request.getAllowSplitShift(), request.getPreferenceDeadlineDay(), userDetails.getUsername())));
     }
 
     // 관리자: 본인이 소유한 매장 목록 조회
@@ -66,6 +87,8 @@ public class StoreController {
         @NotBlank(message = "매장 이름을 입력해주세요.")
         private String name;
         private String address;
+        // 생략하면 기타, 미리 만들어 주는 스킬·교대도 없음
+        private Industry industry;
     }
 
     @Data
@@ -73,6 +96,10 @@ public class StoreController {
         private Boolean guaranteeMustDayOff;
         @Min(value = 1, message = "1인당 객수는 1 이상이어야 합니다.")
         private Integer customersPerStaff;
+        private Boolean allowSplitShift;
+        @Min(value = 1, message = "희망 제출 마감일은 1~28일이어야 합니다.")
+        @Max(value = 28, message = "희망 제출 마감일은 1~28일이어야 합니다.")
+        private Integer preferenceDeadlineDay;
     }
 
     @Data
@@ -88,13 +115,40 @@ public class StoreController {
         private Long id;
         private String name;
         private String address;
+        private Industry industry;
         private String storeCode;
         private boolean guaranteeMustDayOff;
         private int customersPerStaff;
+        private boolean allowSplitShift;
+        private int preferenceDeadlineDay;
 
         static StoreResponse from(Store store) {
-            return new StoreResponse(store.getId(), store.getName(), store.getAddress(), store.getStoreCode(),
-                    store.isMustDayOffGuaranteed(), store.getCustomersPerStaffOrDefault());
+            return new StoreResponse(store.getId(), store.getName(), store.getAddress(), store.getIndustry(),
+                    store.getStoreCode(), store.isMustDayOffGuaranteed(), store.getCustomersPerStaffOrDefault(),
+                    store.isSplitShiftAllowed(), store.getPreferenceDeadlineDayOrDefault());
+        }
+    }
+
+    @Data
+    @AllArgsConstructor
+    static class StorePreviewResponse {
+        private Long id;
+        private String name;
+        private Industry industry;
+        private String industryLabel;
+        private String address;
+        private long employeeCount;
+    }
+
+    record ShiftPresetResponse(String name, LocalTime startTime, LocalTime endTime) {
+    }
+
+    record IndustryResponse(Industry code, String label, List<String> skills, List<ShiftPresetResponse> shifts) {
+        static IndustryResponse from(Industry industry) {
+            return new IndustryResponse(industry, industry.getLabel(), industry.getSkills(),
+                    industry.getShifts().stream()
+                            .map(p -> new ShiftPresetResponse(p.name(), p.startTime(), p.endTime()))
+                            .toList());
         }
     }
 }

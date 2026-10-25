@@ -1,7 +1,14 @@
 package com.example.store_scheduler_backend.service;
 
+import com.example.store_scheduler_backend.domain.EmployeeStatus;
+import com.example.store_scheduler_backend.domain.Industry;
+import com.example.store_scheduler_backend.domain.Shift;
+import com.example.store_scheduler_backend.domain.Skill;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.domain.User;
+import com.example.store_scheduler_backend.repository.EmployeeRepository;
+import com.example.store_scheduler_backend.repository.ShiftRepository;
+import com.example.store_scheduler_backend.repository.SkillRepository;
 import com.example.store_scheduler_backend.repository.StoreRepository;
 import com.example.store_scheduler_backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -18,9 +25,20 @@ public class StoreService {
     private final StoreRepository storeRepository;
     private final UserRepository userRepository;
     private final StoreAccessGuard storeAccessGuard;
+    private final SkillRepository skillRepository;
+    private final ShiftRepository shiftRepository;
+    private final EmployeeRepository employeeRepository;
+
+    public record StorePreview(Store store, long employeeCount) {
+    }
 
     @Transactional
     public Store registerStore(String name, String address, String ownerUsername) {
+        return registerStore(name, address, null, ownerUsername);
+    }
+
+    @Transactional
+    public Store registerStore(String name, String address, Industry industry, String ownerUsername) {
         if (name == null || name.trim().isEmpty()) {
             throw new IllegalArgumentException("매장 이름은 필수 입력 항목입니다.");
         }
@@ -29,8 +47,31 @@ public class StoreService {
 
         // 충돌 방지를 위해 앞 8자리만 사용
         String storeCode = UUID.randomUUID().toString().replace("-", "").substring(0, 8).toUpperCase();
-        Store store = new Store(name, address, owner, storeCode);
-        return storeRepository.save(store);
+        Store store = storeRepository.save(new Store(name, address, industry, owner, storeCode));
+        if (industry != null) {
+            applyPreset(store, industry);
+        }
+        return store;
+    }
+
+    // 필요 인원은 1명으로 시작하고 교대 설정 화면에서 점주가 고친다
+    private void applyPreset(Store store, Industry industry) {
+        industry.getSkills().forEach(name -> skillRepository.save(new Skill(name, store)));
+        for (Industry.ShiftPreset preset : industry.getShifts()) {
+            Shift shift = new Shift();
+            shift.setName(preset.name());
+            shift.setStartTime(preset.startTime());
+            shift.setEndTime(preset.endTime());
+            shift.setRequiredStaff(1);
+            shift.setStore(store);
+            shiftRepository.save(shift);
+        }
+    }
+
+    // 직원이 합류 전에 코드가 맞는 매장인지 확인하는 용도
+    public StorePreview previewByCode(String storeCode) {
+        Store store = findByStoreCode(storeCode);
+        return new StorePreview(store, employeeRepository.countByStoreIdAndStatus(store.getId(), EmployeeStatus.APPROVED));
     }
 
     public List<Store> findMyStores(String ownerUsername) {
@@ -57,8 +98,14 @@ public class StoreService {
 
     @Transactional
     public Store updateSettings(Long storeId, Boolean guaranteeMustDayOff, Integer customersPerStaff, String managerUsername) {
+        return updateSettings(storeId, guaranteeMustDayOff, customersPerStaff, null, null, managerUsername);
+    }
+
+    @Transactional
+    public Store updateSettings(Long storeId, Boolean guaranteeMustDayOff, Integer customersPerStaff, Boolean allowSplitShift,
+                                Integer preferenceDeadlineDay, String managerUsername) {
         Store store = storeAccessGuard.verifyOwner(storeId, managerUsername);
-        store.updateSettings(guaranteeMustDayOff, customersPerStaff);
+        store.updateSettings(guaranteeMustDayOff, customersPerStaff, allowSplitShift, preferenceDeadlineDay);
         return store;
     }
 }

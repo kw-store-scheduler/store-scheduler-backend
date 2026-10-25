@@ -1,6 +1,8 @@
 package com.example.store_scheduler_backend.controller;
 
 import com.example.store_scheduler_backend.domain.ClosingReport;
+import com.example.store_scheduler_backend.domain.StaffingException;
+import com.example.store_scheduler_backend.service.StaffingPlanService;
 import com.example.store_scheduler_backend.service.StaffingSuggestionService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
@@ -25,6 +27,40 @@ import java.util.List;
 public class StaffingController {
 
     private final StaffingSuggestionService staffingSuggestionService;
+    private final StaffingPlanService staffingPlanService;
+
+    // 관리자: 예외일 조회
+    @GetMapping("/api/stores/{storeId}/staffing-exceptions")
+    public ResponseEntity<List<StaffingExceptionResponse>> findExceptions(
+            @PathVariable Long storeId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        return ResponseEntity.ok(staffingPlanService.findExceptions(storeId, from, to, userDetails.getUsername()).stream()
+                .map(StaffingExceptionResponse::from)
+                .toList());
+    }
+
+    // 관리자: 예외일 등록. shiftId를 생략하면 그날 모든 교대, 0명이면 휴무
+    @PostMapping("/api/stores/{storeId}/staffing-exceptions")
+    public ResponseEntity<StaffingExceptionResponse> addException(
+            @PathVariable Long storeId,
+            @Valid @RequestBody StaffingExceptionRequest request,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        int target = request.getTargetStaff() != null ? request.getTargetStaff() : request.getMinStaff();
+        return ResponseEntity.ok(StaffingExceptionResponse.from(staffingPlanService.addException(storeId, request.getDate(),
+                request.getShiftId(), request.getMinStaff(), target, request.getNote(), userDetails.getUsername())));
+    }
+
+    // 관리자: 예외일 삭제
+    @DeleteMapping("/api/stores/{storeId}/staffing-exceptions/{exceptionId}")
+    public ResponseEntity<Void> deleteException(
+            @PathVariable Long storeId,
+            @PathVariable Long exceptionId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        staffingPlanService.deleteException(storeId, exceptionId, userDetails.getUsername());
+        return ResponseEntity.noContent().build();
+    }
 
     // 관리자: 마감 보고 등록 (같은 날짜·교대는 덮어씀)
     @PostMapping("/api/stores/{storeId}/closing-reports")
@@ -83,6 +119,28 @@ public class StaffingController {
         static ClosingReportResponse from(ClosingReport r) {
             return new ClosingReportResponse(r.getId(), r.getShift().getId(), r.getShift().getName(), r.getDate(),
                     r.getCustomerCount(), r.getSales());
+        }
+    }
+
+    @Data
+    static class StaffingExceptionRequest {
+        @NotNull(message = "날짜를 입력해주세요.")
+        private LocalDate date;
+        private Long shiftId;
+        @NotNull(message = "최소 인원을 입력해주세요.")
+        private Integer minStaff;
+        // 생략하면 최소 인원과 같게
+        private Integer targetStaff;
+        private String note;
+    }
+
+    record StaffingExceptionResponse(Long id, LocalDate date, Long shiftId, String shiftName, int minStaff,
+                                     int targetStaff, String note) {
+        static StaffingExceptionResponse from(StaffingException e) {
+            return new StaffingExceptionResponse(e.getId(), e.getDate(),
+                    e.getShift() != null ? e.getShift().getId() : null,
+                    e.getShift() != null ? e.getShift().getName() : null,
+                    e.getMinStaff(), e.getTargetStaff(), e.getNote());
         }
     }
 }

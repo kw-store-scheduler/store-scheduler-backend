@@ -326,7 +326,7 @@ class ScheduleGenerationTest {
     }
 
     @Test
-    void 최고_공평_해는_근무일을_고르게_나누고_최소_비용_해는_더_저렴하다() throws Exception {
+    void 공정_우선은_근무일을_고르게_나누고_인건비_우선은_더_저렴하다() throws Exception {
         // 매일 오픈 1명, 시급만 다른 두 직원. 연속 5일 금지라 한 명이 최대 6일까지 가능
         store = storeRepository.save(new Store("시급차이매장", null, store.getOwner(), "GENCODE2"));
         Employee cheap = approvedEmployee("저시급", 10030);
@@ -338,8 +338,8 @@ class ScheduleGenerationTest {
         String body = automate(WEEK_START).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
 
         var candidates = objectMapper.readTree(body).get("candidates");
-        var fairness = candidateLabeled(candidates, "최고 공평 해");
-        var cost = candidateLabeled(candidates, "최소 비용 해");
+        var fairness = candidateLabeled(candidates, "공정 우선");
+        var cost = candidateLabeled(candidates, "인건비 우선");
         var fairDays = new java.util.ArrayList<Integer>();
         fairness.get("employees").forEach(e -> fairDays.add(e.get("workDays").asInt()));
         assertThat(fairDays).containsExactlyInAnyOrder(4, 3);

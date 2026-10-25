@@ -2,6 +2,7 @@ package com.example.store_scheduler_backend.controller;
 
 import com.example.store_scheduler_backend.domain.SwapRequest;
 import com.example.store_scheduler_backend.service.SubstituteFinder;
+import com.example.store_scheduler_backend.service.OpenShiftService;
 import com.example.store_scheduler_backend.service.SwapRequestService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -18,6 +19,7 @@ import org.springframework.web.bind.annotation.*;
 import java.time.LocalDate;
 import java.time.LocalTime;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequiredArgsConstructor
@@ -25,6 +27,17 @@ import java.util.List;
 public class SwapRequestController {
 
     private final SwapRequestService swapRequestService;
+    private final OpenShiftService openShiftService;
+
+    @Operation(summary = "후보 전체에게 대타 일괄 요청", description = "대신할 수 있는 직원 모두에게 알림을 보내고, 빈 근무 게시판에 글이 없으면 올립니다. 먼저 지원한 사람 중에서 승인하면 됩니다.")
+    @PostMapping("/api/stores/{storeId}/swap-requests/{requestId}/broadcast")
+    public ResponseEntity<BroadcastResponse> broadcast(
+            @PathVariable Long storeId,
+            @PathVariable Long requestId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        OpenShiftService.Broadcast result = openShiftService.broadcast(storeId, requestId, userDetails.getUsername());
+        return ResponseEntity.ok(new BroadcastResponse(result.openShift().getId(), result.notifiedCount()));
+    }
 
     // 직원: 본인 근무 결원 요청
     @PostMapping("/api/stores/{storeId}/schedules/{scheduleId}/swap-requests")
@@ -54,8 +67,9 @@ public class SwapRequestController {
             @PathVariable Long storeId,
             @PathVariable Long requestId,
             @AuthenticationPrincipal UserDetails userDetails) {
+        Map<Long, String> contacts = swapRequestService.findCandidateContacts(storeId, requestId, userDetails.getUsername());
         return ResponseEntity.ok(swapRequestService.findCandidates(storeId, requestId, userDetails.getUsername()).stream()
-                .map(CandidateResponse::from)
+                .map(c -> CandidateResponse.from(c, contacts.get(c.employee().getId())))
                 .toList());
     }
 
@@ -151,10 +165,15 @@ public class SwapRequestController {
         private int weeklyHours;
         private List<String> coveredSkills;
         private List<String> reasons;
+        // OFFERED(지정함), APPLIED(게시판 지원), APPROVED, REJECTED, WITHDRAWN, 연락 전이면 null
+        private String contactStatus;
 
-        static CandidateResponse from(SubstituteFinder.Candidate c) {
+        static CandidateResponse from(SubstituteFinder.Candidate c, String contactStatus) {
             return new CandidateResponse(c.employee().getId(), c.employee().getName(),
-                    c.eligible(), c.weeklyHours(), c.coveredSkills(), c.reasons());
+                    c.eligible(), c.weeklyHours(), c.coveredSkills(), c.reasons(), contactStatus);
         }
+    }
+
+    record BroadcastResponse(Long openShiftId, int notifiedCount) {
     }
 }

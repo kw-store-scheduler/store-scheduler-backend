@@ -53,6 +53,7 @@ public class ScheduleService {
         schedule.setWorkDate(workDate);
         schedule.setStartTime(startTime);
         schedule.setEndTime(endTime);
+        schedule.setAssignmentReasons(null);
         return schedule;
     }
 

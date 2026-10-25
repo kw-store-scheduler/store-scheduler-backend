@@ -1,5 +1,6 @@
 package com.example.store_scheduler_backend.controller;
 
+import com.example.store_scheduler_backend.domain.DayOffFallback;
 import com.example.store_scheduler_backend.domain.DayOffRequest;
 import com.example.store_scheduler_backend.domain.DayOffType;
 import com.example.store_scheduler_backend.service.DayOffRequestService;
@@ -31,9 +32,9 @@ public class DayOffRequestController {
             @PathVariable Long storeId,
             @Valid @RequestBody DayOffRequestBody body,
             @AuthenticationPrincipal UserDetails userDetails) {
-        DayOffRequest saved = dayOffRequestService.request(
-                storeId, body.getDate(), body.getType(), body.getReason(), userDetails.getUsername());
-        return ResponseEntity.ok(DayOffResponse.from(saved));
+        DayOffRequest saved = dayOffRequestService.request(storeId, body.getDate(), body.getType(), body.getReason(),
+                body.getFallbacks() != null ? body.getFallbacks() : List.of(), userDetails.getUsername());
+        return ResponseEntity.ok(DayOffResponse.from(saved, body.getType()));
     }
 
     // 직원: 본인 휴무 신청 목록
@@ -77,6 +78,9 @@ public class DayOffRequestController {
         private DayOffType type;
 
         private String reason;
+
+        // 희망 휴무를 지켜주지 못할 때의 대안을 원하는 순서대로
+        private List<DayOffFallback> fallbacks;
     }
 
     @Data
@@ -88,10 +92,17 @@ public class DayOffRequestController {
         private LocalDate date;
         private String type;
         private String reason;
+        private List<DayOffFallback> fallbacks;
+        // 필수로 신청했지만 월 한도를 넘어 희망 휴무로 저장된 경우
+        private boolean downgraded;
 
         static DayOffResponse from(DayOffRequest r) {
+            return from(r, r.getType());
+        }
+
+        static DayOffResponse from(DayOffRequest r, DayOffType requestedType) {
             return new DayOffResponse(r.getId(), r.getEmployee().getId(), r.getEmployee().getName(),
-                    r.getDate(), r.getType().name(), r.getReason());
+                    r.getDate(), r.getType().name(), r.getReason(), r.getFallbackList(), requestedType != r.getType());
         }
     }
 }

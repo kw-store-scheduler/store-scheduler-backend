@@ -105,6 +105,23 @@ class DayOffRequestTest {
         assertThat(dayOffRequestRepository.findById(id)).isEmpty();
     }
 
+    @Test
+    void 필수_휴무는_한_달에_2일까지이고_넘으면_희망_휴무로_대안과_함께_받는다() throws Exception {
+        java.time.YearMonth next = java.time.YearMonth.now().plusMonths(1);
+        apply("staff", next.atDay(3), "MUST").andExpect(jsonPath("$.type").value("MUST"));
+        apply("staff", next.atDay(4), "MUST").andExpect(jsonPath("$.downgraded").value(false));
+
+        as("staff", Role.EMPLOYEE, post("/api/stores/{storeId}/day-offs", store.getId())
+                .contentType("application/json")
+                .content("{\"date\":\"" + next.atDay(5) + "\",\"type\":\"MUST\",\"fallbacks\":[\"AFTERNOON_OFF\",\"SWAP_DAY\"]}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.type").value("PREFER"))
+                .andExpect(jsonPath("$.downgraded").value(true))
+                .andExpect(jsonPath("$.fallbacks[0]").value("AFTERNOON_OFF"));
+        // 다음 달 필수 휴무는 따로 센다
+        apply("staff", next.plusMonths(1).atDay(3), "MUST").andExpect(jsonPath("$.type").value("MUST"));
+    }
+
     private ResultActions apply(String username, LocalDate date, String type) throws Exception {
         return as(username, Role.EMPLOYEE, post("/api/stores/{storeId}/day-offs", store.getId())
                 .contentType("application/json")

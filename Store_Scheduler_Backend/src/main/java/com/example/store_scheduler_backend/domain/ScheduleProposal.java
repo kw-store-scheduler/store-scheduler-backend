@@ -21,8 +21,12 @@ public class ScheduleProposal {
     @JoinColumn(name = "store_id", nullable = false)
     private Store store;
 
+    // 생성 기간 시작일. 주간이면 월요일, 월간이면 1일
     @Column(nullable = false)
     private LocalDate weekStart;
+
+    // 기존 데이터 때문에 null 허용, null은 7일(주간)로 본다
+    private Integer periodDays;
 
     @Column(nullable = false)
     private String engineStatus;
@@ -46,14 +50,24 @@ public class ScheduleProposal {
 
     public ScheduleProposal(Store store, LocalDate weekStart, String engineStatus, Long solveMs,
                             String candidatesJson, String shortagesJson) {
+        this(store, weekStart, 7, engineStatus, solveMs, candidatesJson, shortagesJson);
+    }
+
+    public ScheduleProposal(Store store, LocalDate weekStart, int periodDays, String engineStatus, Long solveMs,
+                            String candidatesJson, String shortagesJson) {
         this.store = store;
         this.weekStart = weekStart;
+        this.periodDays = periodDays;
         this.engineStatus = engineStatus;
         this.solveMs = solveMs;
         this.candidatesJson = candidatesJson;
         this.shortagesJson = shortagesJson;
         this.status = ProposalStatus.PENDING;
         this.createdAt = LocalDateTime.now();
+    }
+
+    public LocalDate getPeriodEnd() {
+        return weekStart.plusDays((periodDays != null ? periodDays : 7) - 1);
     }
 
     public void confirm(int candidateIndex) {

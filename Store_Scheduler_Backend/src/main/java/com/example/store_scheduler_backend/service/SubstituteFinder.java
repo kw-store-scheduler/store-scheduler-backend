@@ -5,11 +5,17 @@ import com.example.store_scheduler_backend.domain.DayOffRequest;
 import com.example.store_scheduler_backend.domain.DayOffType;
 import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.EmployeeStatus;
+import com.example.store_scheduler_backend.domain.FixedSchedule;
+import com.example.store_scheduler_backend.domain.PreferenceLevel;
 import com.example.store_scheduler_backend.domain.Schedule;
+import com.example.store_scheduler_backend.domain.ShiftPreference;
 import com.example.store_scheduler_backend.domain.Skill;
 import com.example.store_scheduler_backend.repository.AvailabilityRepository;
 import com.example.store_scheduler_backend.repository.DayOffRequestRepository;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
+import com.example.store_scheduler_backend.repository.FixedScheduleRepository;
+import com.example.store_scheduler_backend.repository.PreferenceSubmissionRepository;
+import com.example.store_scheduler_backend.repository.ShiftPreferenceRepository;
 import com.example.store_scheduler_backend.repository.ScheduleRepository;
 import com.example.store_scheduler_backend.repository.ShiftSkillRequirementRepository;
 import lombok.RequiredArgsConstructor;
@@ -19,9 +25,11 @@ import java.text.NumberFormat;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.YearMonth;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -42,6 +50,23 @@ public class SubstituteFinder {
     private final ScheduleRepository scheduleRepository;
     private final DayOffRequestRepository dayOffRequestRepository;
     private final ShiftSkillRequirementRepository requirementRepository;
+    private final ShiftPreferenceRepository preferenceRepository;
+    private final PreferenceSubmissionRepository submissionRepository;
+    private final FixedScheduleRepository fixedScheduleRepository;
+
+    // 그달 희망을 제출했거나 칸을 고른 직원은 요일별 가용 시간 대신 제출한 칸으로 판단한다
+    private record MonthPreferences(Set<Long> submitted, Map<Long, List<ShiftPreference>> onDate,
+                                    Map<Long, List<FixedSchedule>> fixed) {
+        boolean usesPreferences(Employee employee) {
+            return submitted.contains(employee.getId());
+        }
+
+        Optional<ShiftPreference> slot(Employee employee, LocalTime start, LocalTime end) {
+            return onDate.getOrDefault(employee.getId(), List.of()).stream()
+                    .filter(p -> p.getShift().getStartTime().equals(start) && p.getShift().getEndTime().equals(end))
+                    .findFirst();
+        }
+    }
 
     // onPreferredDayOff: 희망 휴무를 신청한 날이라 가능하지만 뒤로 미룸, coveredSkills: 결원으로 모자라게 된 스킬 중 보유한 것
     public record Candidate(Employee employee, boolean eligible, boolean onPreferredDayOff, int weeklyHours,
@@ -57,16 +82,17 @@ public class SubstituteFinder {
 
     // 가능한 직원은 부족 스킬 보유 → 희망 휴무 아님 → 이번 주 근무 시간이 적은 순 → 시급이 낮은 순, 불가능한 직원은 그 뒤에 사유와 함께
     public List<Candidate> find(Long storeId, LocalDate date, LocalTime start, LocalTime end, Long excludeEmployeeId) {
-        return rank(storeId, date, start, end, excludeEmployeeId, loadSlots(storeId, date, null, List.of()));
+        return rank(storeId, date, start, end, excludeEmployeeId, loadSlots(storeId, date, null, null, List.of()));
     }
 
-    // 후보안 검토용: 후보안이 다루는 주는 확정 근무표 대신 후보안 배치를 기준으로 판단한다
+    // 후보안 검토용: 후보안이 다루는 기간은 확정 근무표 대신 후보안 배치를 기준으로 판단한다
     public List<Candidate> findForProposal(Long storeId, LocalDate date, LocalTime start, LocalTime end, Long excludeEmployeeId,
-                                           LocalDate proposalWeekStart, List<WorkSlot> proposedWeek) {
-        return rank(storeId, date, start, end, excludeEmployeeId, loadSlots(storeId, date, proposalWeekStart, proposedWeek));
+                                           LocalDate proposalStart, LocalDate proposalEnd, List<WorkSlot> proposed) {
+        return rank(storeId, date, start, end, excludeEmployeeId, loadSlots(storeId, date, proposalStart, proposalEnd, proposed));
     }
 
-    private Map<Long, List<WorkSlot>> loadSlots(Long storeId, LocalDate date, LocalDate proposalWeekStart, List<WorkSlot> proposedWeek) {
+    private Map<Long, List<WorkSlot>> loadSlots(Long storeId, LocalDate date, LocalDate proposalStart, LocalDate proposalEnd,
+                                                List<WorkSlot> proposedWeek) {
         LocalDate weekStart = date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
         LocalDate from = weekStart.isBefore(date.minusDays(MAX_CONSECUTIVE_DAYS)) ? weekStart : date.minusDays(MAX_CONSECUTIVE_DAYS);
         LocalDate weekEnd = weekStart.plusDays(6);
@@ -74,9 +100,9 @@ public class SubstituteFinder {
 
         List<WorkSlot> slots = new ArrayList<>(proposedWeek);
         for (Schedule schedule : scheduleRepository.findByStoreIdAndWorkDateBetween(storeId, from, to)) {
-            boolean replacedByProposal = proposalWeekStart != null
-                    && !schedule.getWorkDate().isBefore(proposalWeekStart)
-                    && !schedule.getWorkDate().isAfter(proposalWeekStart.plusDays(6));
+            boolean replacedByProposal = proposalStart != null
+                    && !schedule.getWorkDate().isBefore(proposalStart)
+                    && !schedule.getWorkDate().isAfter(proposalEnd);
             if (!replacedByProposal) {
                 slots.add(WorkSlot.of(schedule));
             }
@@ -96,6 +122,7 @@ public class SubstituteFinder {
                 .findByEmployee_StoreIdAndDateBetweenOrderByDateAsc(storeId, date, date).stream()
                 .collect(Collectors.toMap(r -> r.getEmployee().getId(), DayOffRequest::getType));
         Set<Long> missingSkillIds = findMissingSkillIds(storeId, date, start, end, excludeEmployeeId, slotsByEmployee);
+        MonthPreferences preferences = loadPreferences(storeId, date);
 
         List<Candidate> candidates = new ArrayList<>();
         for (Employee employee : employeeRepository.findByStoreIdAndStatus(storeId, EmployeeStatus.APPROVED)) {
@@ -111,7 +138,8 @@ public class SubstituteFinder {
             DayOffType dayOff = dayOffByEmployee.get(employee.getId());
             Optional<String> blocker = dayOff == DayOffType.MUST
                     ? Optional.of("필수 휴무 신청일")
-                    : findBlocker(availabilityByEmployee.get(employee.getId()), own, date, start, end, weeklyHours + shiftHours);
+                    : findBlocker(employee, availabilityByEmployee.get(employee.getId()), preferences, own, date, start, end,
+                    weeklyHours + shiftHours);
             boolean onPreferredDayOff = dayOff == DayOffType.PREFER;
             List<String> coveredSkills = employee.getSkills().stream()
                     .filter(skill -> missingSkillIds.contains(skill.getId()))
@@ -126,8 +154,13 @@ public class SubstituteFinder {
                 if (onPreferredDayOff) {
                     r.add("희망 휴무 신청일");
                 }
-                r.add("가용 시간 " + availabilityByEmployee.get(employee.getId()).getStartTime()
-                        + "~" + availabilityByEmployee.get(employee.getId()).getEndTime());
+                if (preferences.usesPreferences(employee)) {
+                    r.add(preferences.slot(employee, start, end).map(ShiftPreference::getLevel).orElseThrow() == PreferenceLevel.PREFERRED
+                            ? "희망 제출: 선호 칸" : "희망 제출: 가능 칸");
+                } else {
+                    r.add("가용 시간 " + availabilityByEmployee.get(employee.getId()).getStartTime()
+                            + "~" + availabilityByEmployee.get(employee.getId()).getEndTime());
+                }
                 r.add("이번 주 " + weeklyHours + "시간 근무 중");
                 r.add("시급 " + NumberFormat.getInstance(Locale.KOREA).format(wage(employee)) + "원");
                 return r;
@@ -170,12 +203,42 @@ public class SubstituteFinder {
         return employee.getSkills().stream().anyMatch(skill -> skill.getId().equals(skillId));
     }
 
-    private Optional<String> findBlocker(Availability availability, List<WorkSlot> own, LocalDate date,
-                                         LocalTime start, LocalTime end, int weeklyHoursWithShift) {
-        if (availability == null) {
-            return Optional.of("해당 요일 가용 시간 미등록");
+    private MonthPreferences loadPreferences(Long storeId, LocalDate date) {
+        YearMonth month = YearMonth.from(date);
+        Set<Long> submitted = new HashSet<>();
+        submissionRepository.findByEmployee_StoreIdAndMonth(storeId, month.atDay(1))
+                .forEach(s -> submitted.add(s.getEmployee().getId()));
+        List<ShiftPreference> monthPreferences = preferenceRepository.findByEmployee_StoreIdAndDateBetween(
+                storeId, month.atDay(1), month.atEndOfMonth());
+        monthPreferences.forEach(p -> submitted.add(p.getEmployee().getId()));
+        Map<Long, List<ShiftPreference>> onDate = monthPreferences.stream()
+                .filter(p -> p.getDate().equals(date))
+                .collect(Collectors.groupingBy(p -> p.getEmployee().getId()));
+        Map<Long, List<FixedSchedule>> fixed = fixedScheduleRepository.findByEmployee_StoreId(storeId).stream()
+                .collect(Collectors.groupingBy(f -> f.getEmployee().getId()));
+        return new MonthPreferences(submitted, onDate, fixed);
+    }
+
+    private Optional<String> findBlocker(Employee employee, Availability availability, MonthPreferences preferences,
+                                         List<WorkSlot> own, LocalDate date, LocalTime start, LocalTime end,
+                                         int weeklyHoursWithShift) {
+        if (employee.isMinor() && ScheduleAutomationService.isRestrictedForMinor(start, end)) {
+            return Optional.of("미성년자 근무 제한(22시~06시, 하루 7시간 초과)");
         }
-        if (!ScheduleAutomationService.fitsAvailability(start, end, availability.getStartTime(), availability.getEndTime())) {
+        Optional<String> fixed = preferences.fixed().getOrDefault(employee.getId(), List.of()).stream()
+                .filter(f -> f.getDayOfWeek() == date.getDayOfWeek() && f.overlaps(start, end))
+                .map(f -> "고정 일정(" + f.getLabel() + ")과 겹침")
+                .findFirst();
+        if (fixed.isPresent()) {
+            return fixed;
+        }
+        if (preferences.usesPreferences(employee)) {
+            if (preferences.slot(employee, start, end).isEmpty()) {
+                return Optional.of("희망 제출에서 근무 불가로 표시한 칸");
+            }
+        } else if (availability == null) {
+            return Optional.of("해당 요일 가용 시간 미등록");
+        } else if (!ScheduleAutomationService.fitsAvailability(start, end, availability.getStartTime(), availability.getEndTime())) {
             return Optional.of("가용 시간(" + availability.getStartTime() + "~" + availability.getEndTime() + ") 밖의 근무");
         }
         Set<LocalDate> workDays = own.stream().map(WorkSlot::date).collect(Collectors.toSet());

@@ -16,7 +16,9 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @Service
 @Transactional(readOnly = true)
@@ -29,6 +31,7 @@ public class SwapRequestService {
     private final StoreAccessGuard storeAccessGuard;
     private final SubstituteFinder substituteFinder;
     private final FcmService fcmService;
+    private final OpenShiftService openShiftService;
 
     // 직원: 본인 근무에 대한 결원 요청
     @Transactional
@@ -53,6 +56,8 @@ public class SwapRequestService {
         Store store = schedule.getStore();
         fcmService.sendToDevice(store.getOwner().getDeviceToken(), "결원 요청",
                 requester.getName() + "님이 " + schedule.getWorkDate() + " " + schedule.getStartTime() + " 근무에 결원을 요청했습니다.");
+        // 신고와 동시에 빈 근무 게시판에 올리고 대신할 수 있는 직원들에게 알린다
+        openShiftService.postVacancy(saved);
         return saved;
     }
 
@@ -68,6 +73,18 @@ public class SwapRequestService {
         SwapRequest request = findRequest(storeId, requestId);
         return substituteFinder.find(storeId, request.getWorkDate(), request.getStartTime(), request.getEndTime(),
                 request.getRequester().getId());
+    }
+
+    // 관리자: 후보별 연락 상태. 지금 지정된 대타는 OFFERED, 게시판에 지원한 직원은 지원 상태(APPLIED 등)
+    public Map<Long, String> findCandidateContacts(Long storeId, Long requestId, String managerUsername) {
+        storeAccessGuard.verifyOwner(storeId, managerUsername);
+        SwapRequest request = findRequest(storeId, requestId);
+        Map<Long, String> contacts = new HashMap<>();
+        openShiftService.applicationStatusesFor(requestId).forEach((employeeId, status) -> contacts.put(employeeId, status.name()));
+        if (request.getStatus() == SwapStatus.OFFERED) {
+            contacts.put(request.getSubstitute().getId(), SwapStatus.OFFERED.name());
+        }
+        return contacts;
     }
 
     // 관리자: 대타 지정 → 대상 직원에게 알림
@@ -95,6 +112,7 @@ public class SwapRequestService {
             throw new IllegalArgumentException("현재 근무 상황으로는 이 근무를 대신할 수 없습니다.");
         }
         request.accept();
+        openShiftService.closeFor(List.of(request.getId()), true);
         String message = request.getWorkDate() + " " + request.getStartTime() + " 근무를 "
                 + request.getSubstitute().getName() + "님이 대신하기로 했습니다.";
         fcmService.sendToDevice(request.getRequester().getUser().getDeviceToken(), "대타 확정", message);
@@ -122,6 +140,7 @@ public class SwapRequestService {
             throw new AccessDeniedException("본인이 요청한 결원만 취소할 수 있습니다.");
         }
         request.cancel();
+        openShiftService.closeFor(List.of(request.getId()), false);
         return request;
     }
 
@@ -132,7 +151,9 @@ public class SwapRequestService {
             return;
         }
         List<Long> ids = schedules.stream().map(Schedule::getId).toList();
-        swapRequestRepository.findBySchedule_IdIn(ids).forEach(SwapRequest::detachSchedule);
+        List<SwapRequest> requests = swapRequestRepository.findBySchedule_IdIn(ids);
+        openShiftService.closeFor(requests.stream().filter(SwapRequest::isActive).map(SwapRequest::getId).toList(), false);
+        requests.forEach(SwapRequest::detachSchedule);
     }
 
     private boolean isEligible(SwapRequest request, Long employeeId) {

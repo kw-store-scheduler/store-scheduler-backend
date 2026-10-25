@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.*;
 import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.YearMonth;
 import java.time.temporal.TemporalAdjusters;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -36,13 +37,18 @@ public class ScheduleController {
     private final ScheduleService scheduleService;
     private final ScheduleProposalService proposalService;
 
-    @Operation(summary = "주간 근무표 후보안 생성",
-            description = "weekStart(월요일)부터 7일간의 근무표 후보안을 생성합니다. 생략하면 다음 주 월요일 기준입니다. 확정하기 전까지 근무표는 바뀌지 않습니다.")
+    @Operation(summary = "근무표 후보안 생성",
+            description = "month(yyyy-MM)를 주면 그달 전체, 아니면 weekStart(월요일)부터 7일간의 후보안 3개(공정 우선·인건비 우선·희망 우선)를 생성합니다. "
+                    + "둘 다 생략하면 다음 주 월요일 기준입니다. 확정하기 전까지 근무표는 바뀌지 않습니다.")
     @PostMapping("/automate")
     public ResponseEntity<ScheduleProposalResponse> automateSchedule(
             @PathVariable Long storeId,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate weekStart,
+            @RequestParam(required = false) @DateTimeFormat(pattern = "yyyy-MM") YearMonth month,
             @AuthenticationPrincipal UserDetails userDetails) {
+        if (month != null) {
+            return ResponseEntity.ok(automationService.generateMonthlyProposal(storeId, month, userDetails.getUsername()));
+        }
         LocalDate targetWeek = weekStart != null
                 ? weekStart
                 : LocalDate.now().with(TemporalAdjusters.next(DayOfWeek.MONDAY));
