@@ -1,0 +1,39 @@
+# Render Blueprint: 백엔드 웹 서비스 + PostgreSQL
+services:
+  - type: web
+    name: store-scheduler-backend
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /v3/api-docs
+    envVars:
+      - key: DB_HOST
+        fromDatabase:
+          name: store-scheduler-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: store-scheduler-db
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: store-scheduler-db
+          property: database
+      - key: DB_USERNAME
+        fromDatabase:
+          name: store-scheduler-db
+          property: user
+      - key: DB_PASSWORD
+        fromDatabase:
+          name: store-scheduler-db
+          property: password
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JAVA_OPTS
+        value: -XX:MaxRAMPercentage=60
+
+databases:
+  - name: store-scheduler-db
+    plan: free
+    databaseName: scheduler_db
+    user: scheduler
