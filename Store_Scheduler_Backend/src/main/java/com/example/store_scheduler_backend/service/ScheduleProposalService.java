@@ -109,7 +109,7 @@ public class ScheduleProposalService {
         return new ScheduleProposalResponse(proposal.getId(), true, proposal.getEngineStatus(),
                 ScheduleProposalResponse.messageFor(candidates.size(), shortages.size()),
                 proposal.getWeekStart(), proposal.getSolveMs(), proposal.getStatus(), proposal.getConfirmedIndex(),
-                shortages, candidates);
+                shortages, candidates, ScheduleProposalResponse.noticeFor(candidates, shortages));
     }
 
     private List<Candidate> readCandidates(ScheduleProposal proposal) {

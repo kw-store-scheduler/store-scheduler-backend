@@ -26,6 +26,10 @@ public class Employee {
     @Column(nullable = false)
     private EmployeeStatus status = EmployeeStatus.PENDING;
 
+    // 기존 데이터 때문에 null 허용, null은 알바로 본다
+    @Enumerated(EnumType.STRING)
+    private EmploymentType employmentType;
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "store_id")
     private Store store;
@@ -52,8 +56,17 @@ public class Employee {
     }
 
     public void approve(int hourlyWage) {
+        approve(hourlyWage, null);
+    }
+
+    public void approve(int hourlyWage, EmploymentType employmentType) {
         this.status = EmployeeStatus.APPROVED;
         this.hourlyWage = hourlyWage;
+        if (employmentType != null) this.employmentType = employmentType;
+    }
+
+    public EmploymentType getEmploymentType() {
+        return employmentType != null ? employmentType : EmploymentType.PART_TIME;
     }
 
     public void reject() {
@@ -64,10 +77,11 @@ public class Employee {
         this.hourlyWage = hourlyWage;
     }
 
-    public void updateInfo(String name, String phoneNumber, Integer hourlyWage) {
+    public void updateInfo(String name, String phoneNumber, Integer hourlyWage, EmploymentType employmentType) {
         if (name != null && !name.isBlank()) this.name = name;
         if (phoneNumber != null) this.phoneNumber = phoneNumber;
         if (hourlyWage != null) this.hourlyWage = hourlyWage;
+        if (employmentType != null) this.employmentType = employmentType;
     }
 
     public void addSkill(Skill skill) {

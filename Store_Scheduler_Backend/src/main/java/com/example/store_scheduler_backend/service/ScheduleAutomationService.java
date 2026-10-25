@@ -5,6 +5,7 @@ import com.example.store_scheduler_backend.domain.DayOffRequest;
 import com.example.store_scheduler_backend.domain.DayOffType;
 import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.EmployeeStatus;
+import com.example.store_scheduler_backend.domain.EmploymentType;
 import com.example.store_scheduler_backend.domain.Schedule;
 import com.example.store_scheduler_backend.domain.ScheduleProposal;
 import com.example.store_scheduler_backend.domain.Shift;
@@ -12,9 +13,11 @@ import com.example.store_scheduler_backend.domain.ShiftSkillRequirement;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.dto.ScheduleProposalResponse;
 import com.example.store_scheduler_backend.dto.ScheduleProposalResponse.Assignment;
+import com.example.store_scheduler_backend.dto.ScheduleProposalResponse.Backup;
 import com.example.store_scheduler_backend.dto.ScheduleProposalResponse.Candidate;
 import com.example.store_scheduler_backend.dto.ScheduleProposalResponse.DayOffViolation;
 import com.example.store_scheduler_backend.dto.ScheduleProposalResponse.EmployeeSummary;
+import com.example.store_scheduler_backend.dto.ScheduleProposalResponse.Notice;
 import com.example.store_scheduler_backend.dto.ScheduleProposalResponse.Shortage;
 import com.example.store_scheduler_backend.repository.AvailabilityRepository;
 import com.example.store_scheduler_backend.repository.DayOffRequestRepository;
@@ -58,6 +61,8 @@ public class ScheduleAutomationService {
     private static final LocalTime NIGHT_END = LocalTime.of(6, 0);
     // 가용 시간은 자정을 넘겨 등록할 수 없어서, 23:59까지 가능하면 자정 넘김 교대도 가능한 것으로 본다
     private static final LocalTime END_OF_DAY = LocalTime.of(23, 59);
+    private static final int MAX_BACKUPS = 3;
+    private static final int FULL_TIME_MUST_OFF_WEIGHT = 9_000_000;
 
     // 같은 입력을 가중치만 바꿔 다시 풀어 성격이 다른 후보안을 만든다. 키는 엔진의 weight_overrides 이름
     private record Plan(String label, String description, Map<String, Object> weightOverrides) {
@@ -82,6 +87,8 @@ public class ScheduleAutomationService {
     private final ShiftSkillRequirementRepository requirementRepository;
     private final DayOffRequestRepository dayOffRequestRepository;
     private final ObjectMapper objectMapper;
+    private final SubstituteFinder substituteFinder;
+    private final FcmService fcmService;
 
     // weekStart(월요일)부터 7일간의 근무표 후보안을 만든다. 확정 전까지 근무표는 바뀌지 않는다.
     @Transactional
@@ -129,7 +136,8 @@ public class ScheduleAutomationService {
                 solutions.add(new LabeledSolution(plan.label(), plan.description(), toSolution(planResult.get("schedule"))));
             }
         }
-        AssignmentContext context = new AssignmentContext(employees, current, dayOffs, skillRequirements, availabilityByEmployee);
+        AssignmentContext context = new AssignmentContext(storeId, weekStart, employees, current, dayOffs, skillRequirements,
+                availabilityByEmployee);
         List<Candidate> candidates = toCandidates(solutions, weekStart, shifts, context);
         List<Shortage> shortages = new ArrayList<>(toShortages(result.get("shortage_report"), weekStart, shifts));
         shortages.addAll(toSkillShortages(result.get("skill_shortage_report"), weekStart, shifts, skillRequirements));
@@ -137,9 +145,14 @@ public class ScheduleAutomationService {
         ScheduleProposal proposal = proposalRepository.save(new ScheduleProposal(store, weekStart, status, solveMs,
                 objectMapper.writeValueAsString(candidates), objectMapper.writeValueAsString(shortages)));
 
+        Notice notice = ScheduleProposalResponse.noticeFor(candidates, shortages);
+        if (notice.needsAttention()) {
+            fcmService.sendToDevice(store.getOwner().getDeviceToken(), "근무표 후보안 확인 필요",
+                    weekStart + " 주 근무표: " + notice.summary());
+        }
         return new ScheduleProposalResponse(proposal.getId(), true, status,
                 ScheduleProposalResponse.messageFor(candidates.size(), shortages.size()),
-                weekStart, solveMs, proposal.getStatus(), null, shortages, candidates);
+                weekStart, solveMs, proposal.getStatus(), null, shortages, candidates, notice);
     }
 
     // 기준마다 대표 해 하나만 쓰므로 동점 대안 탐색(max_alt_solutions)은 하지 않는다
@@ -203,15 +216,24 @@ public class ScheduleAutomationService {
         return config;
     }
 
+    // 정규직 필수 휴무는 알바(엔진 기본 1천만)보다 낮게 넘겨, 인원을 채우려고 휴무를 깨야 하면 정규직 휴무를 먼저 깬다
+    private Map<String, Object> toEngineOffRequest(DayOffRequest request, LocalDate weekStart) {
+        Map<String, Object> offRequest = new HashMap<>();
+        offRequest.put("day", (int) ChronoUnit.DAYS.between(weekStart, request.getDate()));
+        offRequest.put("type", request.getType() == DayOffType.MUST ? "must" : "prefer");
+        if (request.getType() == DayOffType.MUST && request.getEmployee().getEmploymentType() == EmploymentType.FULL_TIME) {
+            offRequest.put("weight", FULL_TIME_MUST_OFF_WEIGHT);
+        }
+        return offRequest;
+    }
+
     // 필수 휴무 보장이 켜져 있으면 그날의 모든 교대를 근무 불가(하드 제약)로도 넘긴다
     @SuppressWarnings("unchecked")
     private void addOffRequests(Map<String, Object> config, List<DayOffRequest> dayOffs, LocalDate weekStart,
                                 int shiftCount, boolean guaranteeMustDayOff) {
         Map<Long, List<Map<String, Object>>> byEmployee = dayOffs.stream()
                 .collect(Collectors.groupingBy(r -> r.getEmployee().getId(), Collectors.mapping(
-                        r -> Map.<String, Object>of(
-                                "day", (int) ChronoUnit.DAYS.between(weekStart, r.getDate()),
-                                "type", r.getType() == DayOffType.MUST ? "must" : "prefer"),
+                        r -> toEngineOffRequest(r, weekStart),
                         Collectors.toList())));
         for (Map<String, Object> employee : (List<Map<String, Object>>) config.get("employees")) {
             Long id = Long.valueOf(((String) employee.get("id")).substring(EMPLOYEE_KEY_PREFIX.length()));
@@ -278,7 +300,8 @@ public class ScheduleAutomationService {
     }
 
     // 배정 사유와 후보안 지표 계산에 쓰는 생성 시점의 매장 데이터
-    private record AssignmentContext(List<Employee> employees, List<Schedule> current, List<DayOffRequest> dayOffs,
+    private record AssignmentContext(Long storeId, LocalDate weekStart, List<Employee> employees, List<Schedule> current,
+                                     List<DayOffRequest> dayOffs,
                                      List<ShiftSkillRequirement> skillRequirements,
                                      Map<Long, Map<Integer, Availability>> availabilityByEmployee) {
     }
@@ -312,7 +335,7 @@ public class ScheduleAutomationService {
             slotsByCandidate.add(slots);
             candidates.add(new Candidate(candidates.size(), solution.label(), solution.description(),
                     estimateCost(assignments, employees), countChanges(assignments, currentSlots),
-                    summarize(assignments, employees), assignments, findDayOffViolations(assignments, context.dayOffs())));
+                    summarize(assignments, employees), assignments, findDayOffViolations(assignments, context)));
         }
         return candidates;
     }
@@ -404,17 +427,37 @@ public class ScheduleAutomationService {
         return total;
     }
 
-    private List<DayOffViolation> findDayOffViolations(List<Assignment> assignments, List<DayOffRequest> dayOffs) {
-        Map<String, DayOffRequest> dayOffBySlot = dayOffs.stream()
+    private List<DayOffViolation> findDayOffViolations(List<Assignment> assignments, AssignmentContext context) {
+        Map<String, DayOffRequest> dayOffBySlot = context.dayOffs().stream()
                 .collect(Collectors.toMap(r -> r.getEmployee().getId() + "|" + r.getDate(), Function.identity()));
+        Map<Long, Employee> employeeById = context.employees().stream()
+                .collect(Collectors.toMap(Employee::getId, Function.identity()));
+        List<SubstituteFinder.WorkSlot> proposedWeek = assignments.stream()
+                .map(a -> new SubstituteFinder.WorkSlot(employeeById.get(a.employeeId()), a.workDate(), a.startTime(), a.endTime()))
+                .toList();
         List<DayOffViolation> violations = new ArrayList<>();
         for (Assignment a : assignments) {
             DayOffRequest dayOff = dayOffBySlot.get(a.employeeId() + "|" + a.workDate());
-            if (dayOff != null) {
-                violations.add(new DayOffViolation(a.employeeId(), a.employeeName(), a.workDate(), dayOff.getType().name()));
+            if (dayOff == null) {
+                continue;
             }
+            List<Backup> backups = dayOff.getType() == DayOffType.MUST
+                    ? findBackups(a, context, proposedWeek)
+                    : List.of();
+            violations.add(new DayOffViolation(a.employeeId(), a.employeeName(), a.workDate(), dayOff.getType().name(),
+                    a.shiftName(), a.startTime(), a.endTime(), backups));
         }
         return violations;
+    }
+
+    // 필수 휴무를 깨고 배정된 근무를 대신할 사람. 당사자가 못 나온다고 하면 바로 고를 수 있게 상위 몇 명만 준다
+    private List<Backup> findBackups(Assignment assignment, AssignmentContext context,
+                                     List<SubstituteFinder.WorkSlot> proposedWeek) {
+        return substituteFinder.findForProposal(context.storeId(), assignment.workDate(), assignment.startTime(),
+                        assignment.endTime(), assignment.employeeId(), context.weekStart(), proposedWeek).stream()
+                .limit(MAX_BACKUPS)
+                .map(c -> new Backup(c.employee().getId(), c.employee().getName(), c.eligible(), c.reasons()))
+                .toList();
     }
 
     private int countChanges(List<Assignment> assignments, Set<String> currentSlots) {

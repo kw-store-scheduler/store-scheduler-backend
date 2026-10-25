@@ -1,6 +1,7 @@
 package com.example.store_scheduler_backend.service;
 
 import com.example.store_scheduler_backend.domain.Employee;
+import com.example.store_scheduler_backend.domain.EmploymentType;
 import com.example.store_scheduler_backend.domain.EmployeeStatus;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.domain.User;
@@ -38,7 +39,7 @@ public class EmployeeService {
     }
 
     @Transactional
-    public void approve(Long storeId, Long employeeId, int hourlyWage, String managerUsername) {
+    public void approve(Long storeId, Long employeeId, int hourlyWage, EmploymentType employmentType, String managerUsername) {
         Store store = storeAccessGuard.verifyOwner(storeId, managerUsername);
 
         Employee employee = findOne(employeeId);
@@ -48,7 +49,7 @@ public class EmployeeService {
         if (employee.getStatus() != EmployeeStatus.PENDING) {
             throw new IllegalArgumentException("대기 중인 신청만 처리할 수 있습니다.");
         }
-        employee.approve(hourlyWage);
+        employee.approve(hourlyWage, employmentType);
 
         fcmService.sendToDevice(
                 employee.getUser().getDeviceToken(),
@@ -88,14 +89,15 @@ public class EmployeeService {
     }
 
     @Transactional
-    public void updateEmployee(Long storeId, Long employeeId, String name, String phoneNumber, Integer hourlyWage, String managerUsername) {
+    public void updateEmployee(Long storeId, Long employeeId, String name, String phoneNumber, Integer hourlyWage,
+                               EmploymentType employmentType, String managerUsername) {
         storeAccessGuard.verifyOwner(storeId, managerUsername);
 
         Employee employee = findOne(employeeId);
         if (!employee.getStore().getId().equals(storeId)) {
             throw new IllegalArgumentException("해당 매장 소속 직원이 아닙니다.");
         }
-        employee.updateInfo(name, phoneNumber, hourlyWage);
+        employee.updateInfo(name, phoneNumber, hourlyWage, employmentType);
     }
 
     public Employee findOne(Long employeeId) {

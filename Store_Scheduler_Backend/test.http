@@ -123,12 +123,12 @@ Content-Type: application/json
 GET {{host}}/api/stores/{{storeId}}/employees/pending
 Authorization: Bearer {{managerToken}}
 
-### 합류 승인 + 시급 설정 (관리자)
+### 합류 승인 + 시급·고용 형태 설정 (관리자). employmentType: PART_TIME(기본) / FULL_TIME
 POST {{host}}/api/stores/{{storeId}}/employees/{{emp1Id}}/approve
 Authorization: Bearer {{managerToken}}
 Content-Type: application/json
 
-{ "hourlyWage": 10030 }
+{ "hourlyWage": 10030, "employmentType": "FULL_TIME" }
 
 ###
 POST {{host}}/api/stores/{{storeId}}/employees/{{emp2Id}}/approve
