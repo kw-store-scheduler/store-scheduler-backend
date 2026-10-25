@@ -58,6 +58,20 @@ public class ScheduleAutomationService {
     private static final LocalTime NIGHT_END = LocalTime.of(6, 0);
     // 가용 시간은 자정을 넘겨 등록할 수 없어서, 23:59까지 가능하면 자정 넘김 교대도 가능한 것으로 본다
     private static final LocalTime END_OF_DAY = LocalTime.of(23, 59);
+    private static final int MAX_CANDIDATES = 3;
+
+    // 같은 입력을 가중치만 바꿔 다시 풀어 성격이 다른 후보안을 만든다. 키는 엔진의 weight_overrides 이름
+    private record Plan(String label, String description, Map<String, Object> weightOverrides) {
+    }
+
+    private static final List<Plan> PLANS = List.of(
+            new Plan("균형", "기본 우선순위로 인원·휴무·인건비·공평성을 함께 고려", Map.of()),
+            new Plan("공평성 우선", "인건비가 늘더라도 직원 간 근무일 차이를 줄임", Map.of("FAIRNESS_W", 1_000_000)),
+            new Plan("인건비 우선", "근무일 균등·주 15시간·기존 근무 유지보다 인건비 절감을 우선",
+                    Map.of("FAIRNESS_W", 0, "LOW_HOURS_W", 0, "CHANGE_W", 0)));
+
+    private record LabeledSolution(String label, String description, List<Map<String, Object>> solution) {
+    }
 
     private final PythonEngineRunner pythonEngineRunner;
     private final StoreAccessGuard storeAccessGuard;
@@ -99,18 +113,35 @@ public class ScheduleAutomationService {
         Map<String, Object> config = buildEngineConfig(employees, shifts, skillRequirements, availabilityByEmployee);
         addOffRequests(config, dayOffs, weekStart, shifts.size(), store.isMustDayOffGuaranteed());
         config.put("prev_assignments", toPrevAssignments(current, weekStart, employees, shifts));
-        Map<String, Object> result = pythonEngineRunner.run(config);
-        String status = (String) result.get("status");
 
+        // 인원·스킬 부족과 상태는 균형안 기준. 균형안이 해를 못 찾으면 다른 기준으로도 찾을 수 없다
+        Map<String, Object> result = pythonEngineRunner.run(withPlan(config, PLANS.get(0), MAX_CANDIDATES));
+        String status = (String) result.get("status");
         if (result.get("schedule") == null) {
             return ScheduleProposalResponse.failed(status, weekStart);
         }
+        long solveMs = solveMsOf(result);
+        List<LabeledSolution> solutions = new ArrayList<>();
+        solutions.add(new LabeledSolution(PLANS.get(0).label(), PLANS.get(0).description(), toSolution(result.get("schedule"))));
+        for (Plan plan : PLANS.subList(1, PLANS.size())) {
+            Map<String, Object> planResult = pythonEngineRunner.run(withPlan(config, plan, 1));
+            solveMs += solveMsOf(planResult);
+            if (planResult.get("schedule") != null) {
+                solutions.add(new LabeledSolution(plan.label(), plan.description(), toSolution(planResult.get("schedule"))));
+            }
+        }
+        Object alternatives = result.get("alt_schedules");
+        if (alternatives != null) {
+            int n = 1;
+            for (Object alternative : (List<?>) alternatives) {
+                solutions.add(new LabeledSolution("균형 대안 " + n++, "균형안과 같은 점수의 다른 배치", toSolution(alternative)));
+            }
+        }
 
         AssignmentContext context = new AssignmentContext(employees, current, dayOffs, skillRequirements, availabilityByEmployee);
-        List<Candidate> candidates = toCandidates(result, weekStart, shifts, context);
+        List<Candidate> candidates = toCandidates(solutions, weekStart, shifts, context);
         List<Shortage> shortages = new ArrayList<>(toShortages(result.get("shortage_report"), weekStart, shifts));
         shortages.addAll(toSkillShortages(result.get("skill_shortage_report"), weekStart, shifts, skillRequirements));
-        Long solveMs = toLong(result.get("solve_ms"));
 
         ScheduleProposal proposal = proposalRepository.save(new ScheduleProposal(store, weekStart, status, solveMs,
                 objectMapper.writeValueAsString(candidates), objectMapper.writeValueAsString(shortages)));
@@ -118,6 +149,18 @@ public class ScheduleAutomationService {
         return new ScheduleProposalResponse(proposal.getId(), true, status,
                 ScheduleProposalResponse.messageFor(candidates.size(), shortages.size()),
                 weekStart, solveMs, proposal.getStatus(), null, shortages, candidates);
+    }
+
+    private Map<String, Object> withPlan(Map<String, Object> config, Plan plan, int maxSolutions) {
+        Map<String, Object> planConfig = new HashMap<>(config);
+        planConfig.put("weight_overrides", plan.weightOverrides());
+        planConfig.put("max_alt_solutions", maxSolutions);
+        return planConfig;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<Map<String, Object>> toSolution(Object schedule) {
+        return (List<Map<String, Object>>) schedule;
     }
 
     private Map<String, Object> buildEngineConfig(List<Employee> employees, List<Shift> shifts,
@@ -138,6 +181,7 @@ public class ScheduleAutomationService {
             config.put("unavailable_slots", unavailableSlots(availabilityByDay, shifts));
             config.put("preferred_shifts", allShiftIndices);
             config.put("skills", employee.getSkills().stream().map(sk -> SKILL_KEY_PREFIX + sk.getId()).toList());
+            config.put("hourly", employee.getHourlyWage() != null ? employee.getHourlyWage() : 0);
             employeeConfigs.add(config);
         }
 
@@ -157,6 +201,7 @@ public class ScheduleAutomationService {
         config.put("employees", employeeConfigs);
         config.put("shifts", shiftConfigs);
         config.put("target_staff", targetStaff);
+        config.put("max_staff", targetStaff);
         config.put("min_staff", minStaff);
         config.put("base_hourly", averageHourlyWage(employees));
         config.put("night_bonus", NIGHT_BONUS_RATE);
@@ -246,17 +291,10 @@ public class ScheduleAutomationService {
                                      Map<Long, Map<Integer, Availability>> availabilityByEmployee) {
     }
 
-    // 엔진의 대표 해(schedule)를 0번, 동일 비용의 대안 해(alt_schedules)를 1번부터 후보안으로 만든다
-    @SuppressWarnings("unchecked")
-    private List<Candidate> toCandidates(Map<String, Object> result, LocalDate weekStart, List<Shift> shifts,
+    // 기준별 해를 순서대로 후보안으로 만든다. 배치가 같은 해는 하나로 합치고 라벨만 이어 붙이며, 최대 3개까지
+    private List<Candidate> toCandidates(List<LabeledSolution> solutions, LocalDate weekStart, List<Shift> shifts,
                                          AssignmentContext context) {
         List<Employee> employees = context.employees();
-        List<List<Map<String, Object>>> solutions = new ArrayList<>();
-        solutions.add((List<Map<String, Object>>) result.get("schedule"));
-        Object alternatives = result.get("alt_schedules");
-        if (alternatives != null) {
-            solutions.addAll((List<List<Map<String, Object>>>) alternatives);
-        }
 
         Map<String, Employee> employeeByKey = employees.stream()
                 .collect(Collectors.toMap(this::employeeKey, Function.identity()));
@@ -265,12 +303,27 @@ public class ScheduleAutomationService {
                 .collect(Collectors.toSet());
 
         List<Candidate> candidates = new ArrayList<>();
-        for (int i = 0; i < solutions.size(); i++) {
-            List<Assignment> assignments = withReasons(toAssignments(solutions.get(i), weekStart, employeeByKey, shifts),
+        List<Set<String>> slotsByCandidate = new ArrayList<>();
+        for (LabeledSolution solution : solutions) {
+            List<Assignment> assignments = withReasons(toAssignments(solution.solution(), weekStart, employeeByKey, shifts),
                     currentSlots, context);
-            candidates.add(new Candidate(i, estimateCost(assignments, employees),
-                    countChanges(assignments, currentSlots), summarize(assignments, employees), assignments,
-                    findDayOffViolations(assignments, context.dayOffs())));
+            Set<String> slots = assignments.stream()
+                    .map(a -> slotKey(a.employeeId(), a.workDate(), a.startTime()))
+                    .collect(Collectors.toSet());
+            int same = slotsByCandidate.indexOf(slots);
+            if (same >= 0) {
+                Candidate c = candidates.get(same);
+                candidates.set(same, new Candidate(c.index(), c.label() + " · " + solution.label(), c.description(),
+                        c.estimatedCost(), c.changedFromCurrent(), c.employees(), c.assignments(), c.dayOffViolations()));
+                continue;
+            }
+            if (candidates.size() == MAX_CANDIDATES) {
+                continue;
+            }
+            slotsByCandidate.add(slots);
+            candidates.add(new Candidate(candidates.size(), solution.label(), solution.description(),
+                    estimateCost(assignments, employees), countChanges(assignments, currentSlots),
+                    summarize(assignments, employees), assignments, findDayOffViolations(assignments, context.dayOffs())));
         }
         return candidates;
     }
@@ -509,5 +562,10 @@ public class ScheduleAutomationService {
 
     private static Long toLong(Object value) {
         return value == null ? null : ((Number) value).longValue();
+    }
+
+    private static long solveMsOf(Map<String, Object> result) {
+        Long ms = toLong(result.get("solve_ms"));
+        return ms != null ? ms : 0;
     }
 }

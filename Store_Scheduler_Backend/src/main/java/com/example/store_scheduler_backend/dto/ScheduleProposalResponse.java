@@ -41,8 +41,9 @@ public class ScheduleProposalResponse {
         return message;
     }
 
+    // label: 어떤 기준으로 만든 안인지 (균형 / 공평성 우선 / 인건비 우선, 결과가 같으면 합쳐서 표시)
     // changedFromCurrent: 생성 시점의 확정 근무표와 비교해 달라진 칸 수 (추가 + 삭제)
-    public record Candidate(int index, long estimatedCost, int changedFromCurrent,
+    public record Candidate(int index, String label, String description, long estimatedCost, int changedFromCurrent,
                             List<EmployeeSummary> employees, List<Assignment> assignments,
                             List<DayOffViolation> dayOffViolations) {
     }
