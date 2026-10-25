@@ -26,11 +26,37 @@ public class ScheduleProposalResponse {
     private Integer confirmedIndex;
     private List<Shortage> shortages;
     private List<Candidate> candidates;
+    private Notice notice;
 
     public static ScheduleProposalResponse failed(String status, LocalDate weekStart) {
         return new ScheduleProposalResponse(null, false, status,
                 "현재 조건으로는 근무표를 생성할 수 없습니다. 직원 가용 시간이나 근무 시간대 설정을 확인해주세요.",
-                weekStart, null, null, null, List.of(), List.of());
+                weekStart, null, null, null, List.of(), List.of(), null);
+    }
+
+    // 관리자가 확정 전에 꼭 봐야 할 건수. 균형 해(0번) 기준
+    public record Notice(int shortageCount, int mustDayOffViolationCount, int preferDayOffViolationCount, String summary) {
+        public boolean needsAttention() {
+            return shortageCount + mustDayOffViolationCount + preferDayOffViolationCount > 0;
+        }
+    }
+
+    public static Notice noticeFor(List<Candidate> candidates, List<Shortage> shortages) {
+        List<DayOffViolation> violations = candidates.isEmpty() ? List.of() : candidates.get(0).dayOffViolations();
+        int must = (int) violations.stream().filter(v -> "MUST".equals(v.type())).count();
+        int prefer = violations.size() - must;
+        List<String> parts = new java.util.ArrayList<>();
+        if (!shortages.isEmpty()) {
+            parts.add("인원 부족 " + shortages.size() + "건");
+        }
+        if (must > 0) {
+            parts.add("필수 휴무 위반 " + must + "건(예비 대타 확인 필요)");
+        }
+        if (prefer > 0) {
+            parts.add("희망 휴무 위반 " + prefer + "건");
+        }
+        String summary = parts.isEmpty() ? "확인이 필요한 항목이 없습니다." : String.join(", ", parts);
+        return new Notice(shortages.size(), must, prefer, summary);
     }
 
     public static String messageFor(int candidateCount, int shortageCount) {
@@ -48,8 +74,13 @@ public class ScheduleProposalResponse {
                             List<DayOffViolation> dayOffViolations) {
     }
 
-    // 휴무를 신청한 날에 배정된 근무
-    public record DayOffViolation(Long employeeId, String employeeName, LocalDate date, String type) {
+    // 휴무를 신청한 날에 배정된 근무. 필수 휴무면 그 근무를 대신할 수 있는 예비 대타(backups)를 함께 준다
+    public record DayOffViolation(Long employeeId, String employeeName, LocalDate date, String type,
+                                  String shiftName, LocalTime startTime, LocalTime endTime, List<Backup> backups) {
+    }
+
+    // 가능한 사람이 없으면 eligible=false인 직원이 사유와 함께 온다
+    public record Backup(Long employeeId, String name, boolean eligible, List<String> reasons) {
     }
 
     public record EmployeeSummary(Long employeeId, String name, int workDays, int hours) {

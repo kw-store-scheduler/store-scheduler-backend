@@ -48,15 +48,46 @@ public class SubstituteFinder {
                             List<String> coveredSkills, List<String> reasons) {
     }
 
+    // 근무 한 칸. 확정 근무표뿐 아니라 아직 확정 전인 후보안의 배치도 같은 규칙으로 검사하기 위해 쓴다
+    public record WorkSlot(Employee employee, LocalDate date, LocalTime start, LocalTime end) {
+        static WorkSlot of(Schedule schedule) {
+            return new WorkSlot(schedule.getEmployee(), schedule.getWorkDate(), schedule.getStartTime(), schedule.getEndTime());
+        }
+    }
+
     // 가능한 직원은 부족 스킬 보유 → 희망 휴무 아님 → 이번 주 근무 시간이 적은 순 → 시급이 낮은 순, 불가능한 직원은 그 뒤에 사유와 함께
     public List<Candidate> find(Long storeId, LocalDate date, LocalTime start, LocalTime end, Long excludeEmployeeId) {
+        return rank(storeId, date, start, end, excludeEmployeeId, loadSlots(storeId, date, null, List.of()));
+    }
+
+    // 후보안 검토용: 후보안이 다루는 주는 확정 근무표 대신 후보안 배치를 기준으로 판단한다
+    public List<Candidate> findForProposal(Long storeId, LocalDate date, LocalTime start, LocalTime end, Long excludeEmployeeId,
+                                           LocalDate proposalWeekStart, List<WorkSlot> proposedWeek) {
+        return rank(storeId, date, start, end, excludeEmployeeId, loadSlots(storeId, date, proposalWeekStart, proposedWeek));
+    }
+
+    private Map<Long, List<WorkSlot>> loadSlots(Long storeId, LocalDate date, LocalDate proposalWeekStart, List<WorkSlot> proposedWeek) {
         LocalDate weekStart = date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
         LocalDate from = weekStart.isBefore(date.minusDays(MAX_CONSECUTIVE_DAYS)) ? weekStart : date.minusDays(MAX_CONSECUTIVE_DAYS);
         LocalDate weekEnd = weekStart.plusDays(6);
         LocalDate to = weekEnd.isAfter(date.plusDays(MAX_CONSECUTIVE_DAYS)) ? weekEnd : date.plusDays(MAX_CONSECUTIVE_DAYS);
 
-        Map<Long, List<Schedule>> schedulesByEmployee = scheduleRepository.findByStoreIdAndWorkDateBetween(storeId, from, to).stream()
-                .collect(Collectors.groupingBy(s -> s.getEmployee().getId()));
+        List<WorkSlot> slots = new ArrayList<>(proposedWeek);
+        for (Schedule schedule : scheduleRepository.findByStoreIdAndWorkDateBetween(storeId, from, to)) {
+            boolean replacedByProposal = proposalWeekStart != null
+                    && !schedule.getWorkDate().isBefore(proposalWeekStart)
+                    && !schedule.getWorkDate().isAfter(proposalWeekStart.plusDays(6));
+            if (!replacedByProposal) {
+                slots.add(WorkSlot.of(schedule));
+            }
+        }
+        return slots.stream().collect(Collectors.groupingBy(slot -> slot.employee().getId()));
+    }
+
+    private List<Candidate> rank(Long storeId, LocalDate date, LocalTime start, LocalTime end, Long excludeEmployeeId,
+                                 Map<Long, List<WorkSlot>> slotsByEmployee) {
+        LocalDate weekStart = date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+        LocalDate weekEnd = weekStart.plusDays(6);
         Map<Long, Availability> availabilityByEmployee = availabilityRepository.findByEmployee_StoreId(storeId).stream()
                 .filter(a -> a.getDayOfWeek() == date.getDayOfWeek())
                 .collect(Collectors.toMap(a -> a.getEmployee().getId(), a -> a));
@@ -64,17 +95,17 @@ public class SubstituteFinder {
         Map<Long, DayOffType> dayOffByEmployee = dayOffRequestRepository
                 .findByEmployee_StoreIdAndDateBetweenOrderByDateAsc(storeId, date, date).stream()
                 .collect(Collectors.toMap(r -> r.getEmployee().getId(), DayOffRequest::getType));
-        Set<Long> missingSkillIds = findMissingSkillIds(storeId, date, start, end, excludeEmployeeId, schedulesByEmployee);
+        Set<Long> missingSkillIds = findMissingSkillIds(storeId, date, start, end, excludeEmployeeId, slotsByEmployee);
 
         List<Candidate> candidates = new ArrayList<>();
         for (Employee employee : employeeRepository.findByStoreIdAndStatus(storeId, EmployeeStatus.APPROVED)) {
             if (employee.getId().equals(excludeEmployeeId)) {
                 continue;
             }
-            List<Schedule> own = schedulesByEmployee.getOrDefault(employee.getId(), List.of());
+            List<WorkSlot> own = slotsByEmployee.getOrDefault(employee.getId(), List.of());
             int weeklyHours = own.stream()
-                    .filter(s -> !s.getWorkDate().isBefore(weekStart) && !s.getWorkDate().isAfter(weekEnd))
-                    .mapToInt(s -> ScheduleAutomationService.shiftHours(s.getStartTime(), s.getEndTime()))
+                    .filter(s -> !s.date().isBefore(weekStart) && !s.date().isAfter(weekEnd))
+                    .mapToInt(s -> ScheduleAutomationService.shiftHours(s.start(), s.end()))
                     .sum();
 
             DayOffType dayOff = dayOffByEmployee.get(employee.getId());
@@ -120,11 +151,11 @@ public class SubstituteFinder {
 
     // 같은 시간대 교대의 필요 스킬 중, 결원자를 빼면 그날 같은 근무자로 채워지지 않는 스킬
     private Set<Long> findMissingSkillIds(Long storeId, LocalDate date, LocalTime start, LocalTime end, Long excludeEmployeeId,
-                                          Map<Long, List<Schedule>> schedulesByEmployee) {
-        List<Employee> coworkers = schedulesByEmployee.values().stream()
+                                          Map<Long, List<WorkSlot>> slotsByEmployee) {
+        List<Employee> coworkers = slotsByEmployee.values().stream()
                 .flatMap(List::stream)
-                .filter(s -> s.getWorkDate().equals(date) && s.getStartTime().equals(start) && s.getEndTime().equals(end))
-                .map(Schedule::getEmployee)
+                .filter(s -> s.date().equals(date) && s.start().equals(start) && s.end().equals(end))
+                .map(WorkSlot::employee)
                 .filter(e -> !e.getId().equals(excludeEmployeeId))
                 .toList();
         return requirementRepository.findByShift_Store_Id(storeId).stream()
@@ -139,7 +170,7 @@ public class SubstituteFinder {
         return employee.getSkills().stream().anyMatch(skill -> skill.getId().equals(skillId));
     }
 
-    private Optional<String> findBlocker(Availability availability, List<Schedule> own, LocalDate date,
+    private Optional<String> findBlocker(Availability availability, List<WorkSlot> own, LocalDate date,
                                          LocalTime start, LocalTime end, int weeklyHoursWithShift) {
         if (availability == null) {
             return Optional.of("해당 요일 가용 시간 미등록");
@@ -147,7 +178,7 @@ public class SubstituteFinder {
         if (!ScheduleAutomationService.fitsAvailability(start, end, availability.getStartTime(), availability.getEndTime())) {
             return Optional.of("가용 시간(" + availability.getStartTime() + "~" + availability.getEndTime() + ") 밖의 근무");
         }
-        Set<LocalDate> workDays = own.stream().map(Schedule::getWorkDate).collect(Collectors.toSet());
+        Set<LocalDate> workDays = own.stream().map(WorkSlot::date).collect(Collectors.toSet());
         if (workDays.contains(date)) {
             return Optional.of("같은 날 다른 근무가 있음");
         }

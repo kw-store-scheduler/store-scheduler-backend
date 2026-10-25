@@ -4,6 +4,7 @@ import com.example.store_scheduler_backend.domain.Availability;
 import com.example.store_scheduler_backend.domain.DayOffRequest;
 import com.example.store_scheduler_backend.domain.DayOffType;
 import com.example.store_scheduler_backend.domain.Employee;
+import com.example.store_scheduler_backend.domain.EmploymentType;
 import com.example.store_scheduler_backend.domain.Role;
 import com.example.store_scheduler_backend.domain.Schedule;
 import com.example.store_scheduler_backend.domain.Shift;
@@ -275,6 +276,44 @@ class ScheduleGenerationTest {
             }
         });
         assertThat(tuesdayShortages).contains("오픈", "마감");
+    }
+
+    @Test
+    void 알바와_정규직이_같은_날_필수_휴무면_정규직을_배정하고_예비_대타와_알림을_준다() throws Exception {
+        // 화요일에만 있는 오픈 1명. 화요일 가능자는 둘뿐이고 둘 다 필수 휴무 → 최소 인원 때문에 한 명은 배정된다
+        store = storeRepository.save(new Store("휴무충돌매장", null, store.getOwner(), "GENCODE3"));
+        Employee partTimer = approvedEmployee("알바", 10030);
+        User fullUser = userRepository.save(new User("user-정규", "pw", Role.EMPLOYEE));
+        Employee fullTimer = new Employee("정규", null, store, fullUser);
+        fullTimer.approve(10030, EmploymentType.FULL_TIME);
+        employeeRepository.save(fullTimer);
+        available(partTimer, DayOfWeek.TUESDAY);
+        available(fullTimer, DayOfWeek.TUESDAY);
+        Shift open = new Shift();
+        open.setName("오픈");
+        open.setStartTime(LocalTime.of(9, 0));
+        open.setEndTime(LocalTime.of(13, 0));
+        open.setRequiredStaff(1);
+        open.setDayOfWeek(DayOfWeek.TUESDAY);
+        open.setStore(store);
+        shiftRepository.save(open);
+        LocalDate tuesday = WEEK_START.plusDays(1);
+        dayOffRequestRepository.save(new DayOffRequest(partTimer, tuesday, DayOffType.MUST, "시험"));
+        dayOffRequestRepository.save(new DayOffRequest(fullTimer, tuesday, DayOffType.MUST, "개인 사정"));
+
+        String body = automate(WEEK_START).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+
+        JsonNode result = objectMapper.readTree(body);
+        JsonNode violation = result.get("candidates").get(0).get("dayOffViolations").get(0);
+        assertThat(violation.get("employeeName").asText()).isEqualTo("정규");
+        assertThat(violation.get("shiftName").asText()).isEqualTo("오픈");
+        JsonNode backup = violation.get("backups").get(0);
+        assertThat(backup.get("name").asText()).isEqualTo("알바");
+        assertThat(backup.get("eligible").asBoolean()).isFalse();
+        assertThat(backup.get("reasons").get(0).asText()).isEqualTo("필수 휴무 신청일");
+        JsonNode notice = result.get("notice");
+        assertThat(notice.get("mustDayOffViolationCount").asInt()).isEqualTo(1);
+        assertThat(notice.get("summary").asText()).contains("필수 휴무 위반 1건");
     }
 
     @Test

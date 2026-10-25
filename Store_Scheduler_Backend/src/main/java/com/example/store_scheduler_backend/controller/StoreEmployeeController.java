@@ -1,6 +1,7 @@
 package com.example.store_scheduler_backend.controller;
 
 import com.example.store_scheduler_backend.domain.Employee;
+import com.example.store_scheduler_backend.domain.EmploymentType;
 import com.example.store_scheduler_backend.domain.Skill;
 import com.example.store_scheduler_backend.service.EmployeeService;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -65,18 +66,19 @@ public class StoreEmployeeController {
             @PathVariable Long employeeId,
             @Valid @RequestBody ApproveRequest request,
             @AuthenticationPrincipal UserDetails userDetails) {
-        employeeService.approve(storeId, employeeId, request.getHourlyWage(), userDetails.getUsername());
+        employeeService.approve(storeId, employeeId, request.getHourlyWage(), request.getEmploymentType(), userDetails.getUsername());
         return ResponseEntity.ok().build();
     }
 
-    // 관리자: 직원 정보 수정 (이름, 전화번호, 시급)
+    // 관리자: 직원 정보 수정 (이름, 전화번호, 시급, 고용 형태)
     @PatchMapping("/api/stores/{storeId}/employees/{employeeId}")
     public ResponseEntity<Void> updateEmployee(
             @PathVariable Long storeId,
             @PathVariable Long employeeId,
             @RequestBody UpdateEmployeeRequest request,
             @AuthenticationPrincipal UserDetails userDetails) {
-        employeeService.updateEmployee(storeId, employeeId, request.getName(), request.getPhoneNumber(), request.getHourlyWage(), userDetails.getUsername());
+        employeeService.updateEmployee(storeId, employeeId, request.getName(), request.getPhoneNumber(), request.getHourlyWage(),
+                request.getEmploymentType(), userDetails.getUsername());
         return ResponseEntity.ok().build();
     }
 
@@ -95,6 +97,7 @@ public class StoreEmployeeController {
         private String name;
         private String phoneNumber;
         private Integer hourlyWage;
+        private EmploymentType employmentType;
     }
 
     @Data
@@ -116,6 +119,8 @@ public class StoreEmployeeController {
         @NotNull(message = "시급을 입력해주세요.")
         @Min(value = 1, message = "시급은 0보다 커야 합니다.")
         private Integer hourlyWage;
+        // 생략하면 알바(PART_TIME)
+        private EmploymentType employmentType;
     }
 
     @Data
@@ -126,6 +131,7 @@ public class StoreEmployeeController {
         private String phoneNumber;
         private Integer hourlyWage;
         private String status;
+        private EmploymentType employmentType;
         private List<String> skills;
 
         static EmployeeResponse from(Employee e) {
@@ -135,6 +141,7 @@ public class StoreEmployeeController {
                     e.getPhoneNumber(),
                     e.getHourlyWage(),
                     e.getStatus().name(),
+                    e.getEmploymentType(),
                     e.getSkills().stream().map(Skill::getName).collect(Collectors.toList())
             );
         }

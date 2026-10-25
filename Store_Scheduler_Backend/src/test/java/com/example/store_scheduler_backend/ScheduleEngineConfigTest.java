@@ -4,6 +4,7 @@ import com.example.store_scheduler_backend.domain.Availability;
 import com.example.store_scheduler_backend.domain.DayOffRequest;
 import com.example.store_scheduler_backend.domain.DayOffType;
 import com.example.store_scheduler_backend.domain.Employee;
+import com.example.store_scheduler_backend.domain.EmploymentType;
 import com.example.store_scheduler_backend.domain.Role;
 import com.example.store_scheduler_backend.domain.Schedule;
 import com.example.store_scheduler_backend.domain.Shift;
@@ -165,6 +166,26 @@ class ScheduleEngineConfigTest {
         assertThat(candidates).extracting(Candidate::label).containsExactly("균형 해 · 최소 비용 해", "최고 공평 해");
         assertThat(candidates).extracting(Candidate::index).containsExactly(0, 1);
         assertThat(candidates).extracting(Candidate::estimatedCost).containsExactly(4L * 10030, 4L * 12000);
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void 정규직_필수_휴무만_알바보다_낮은_패널티로_넘긴다() {
+        Employee fullTimer = new Employee("정규", null, store, userRepository.save(new User("full", "pw", Role.EMPLOYEE)));
+        fullTimer.approve(10030, EmploymentType.FULL_TIME);
+        employeeRepository.save(fullTimer);
+        dayOffRequestRepository.save(new DayOffRequest(employee, WEEK_START, DayOffType.MUST, null));
+        dayOffRequestRepository.save(new DayOffRequest(fullTimer, WEEK_START, DayOffType.MUST, null));
+        dayOffRequestRepository.save(new DayOffRequest(fullTimer, WEEK_START.plusDays(SAT), DayOffType.PREFER, null));
+
+        List<Map<String, Object>> employees = (List<Map<String, Object>>) generateAndCaptureConfig().get("employees");
+
+        Map<String, Object> partConfig = employees.stream().filter(e -> e.get("id").equals("emp_" + employee.getId())).findFirst().orElseThrow();
+        Map<String, Object> fullConfig = employees.stream().filter(e -> e.get("id").equals("emp_" + fullTimer.getId())).findFirst().orElseThrow();
+        assertThat((List<Map<String, Object>>) partConfig.get("off_requests")).containsExactly(Map.of("day", MON, "type", "must"));
+        assertThat((List<Map<String, Object>>) fullConfig.get("off_requests")).containsExactlyInAnyOrder(
+                Map.of("day", MON, "type", "must", "weight", 9_000_000),
+                Map.of("day", SAT, "type", "prefer"));
     }
 
     @Test
