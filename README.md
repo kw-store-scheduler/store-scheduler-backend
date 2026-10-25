@@ -222,6 +222,7 @@ docker compose up -d     # PostgreSQL 16 (scheduler_db / scheduler / scheduler)
 ```bash
 ./gradlew test           # H2 사용, Docker 불필요. python3 + ortools가 있으면 실제 엔진 테스트도 실행
 ```
+PR과 main push마다 GitHub Actions(`.github/workflows/test.yml`)에서 OR-Tools를 설치하고 같은 테스트를 실행한다.
 
 ### 환경 변수 (local 프로파일 외 실행 시)
 | 변수 | 설명 | 기본값 |
@@ -233,6 +234,14 @@ docker compose up -d     # PostgreSQL 16 (scheduler_db / scheduler / scheduler)
 | `ENGINE_TIMEOUT_SECONDS` | 엔진 응답 대기 한도 | 60 |
 
 FCM 서비스 계정 키(`firebase-service-account.json`)가 클래스패스에 없으면 푸시 알림만 비활성화되고 나머지 기능은 정상 동작한다.
+
+### 배포 (Docker / Render)
+- `Dockerfile`: Spring Boot jar와 Python OR-Tools를 한 이미지로 묶는다. `PORT` 환경변수로 포트를 받는다.
+- `render.yaml`: Render Blueprint. 웹 서비스와 PostgreSQL을 함께 만들고 DB 접속 정보·`JWT_SECRET`을 자동으로 연결한다.
+```bash
+docker build -t store-scheduler .
+docker run -p 8080:8080 -e DB_URL=... -e DB_USERNAME=... -e DB_PASSWORD=... -e JWT_SECRET=... store-scheduler
+```
 
 
 ## API
