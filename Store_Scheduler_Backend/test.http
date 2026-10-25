@@ -317,7 +317,32 @@ POST {{host}}/api/stores/{{storeId}}/swap-requests/{{swapRequestId}}/accept
 Authorization: Bearer {{staff3Token}}
 
 
-### ─────────────── 7. 급여 · 기타 ───────────────
+### ─────────────── 7. 다음 달 인력 제안 (관리자) ───────────────
+
+### 마감 보고 등록 (같은 날짜·교대는 덮어씀, 미래 날짜 불가)
+POST {{host}}/api/stores/{{storeId}}/closing-reports
+Authorization: Bearer {{managerToken}}
+Content-Type: application/json
+
+{ "shiftId": {{openShiftId}}, "date": "2026-10-21", "customerCount": 75, "sales": 820000 }
+
+### 마감 보고 조회
+GET {{host}}/api/stores/{{storeId}}/closing-reports?from=2026-10-01&to=2026-10-31
+Authorization: Bearer {{managerToken}}
+
+### 1인당 감당 객수 설정 (기본 30)
+PATCH {{host}}/api/stores/{{storeId}}/settings
+Authorization: Bearer {{managerToken}}
+Content-Type: application/json
+
+{ "customersPerStaff": 30 }
+
+### 다음 달 인력 제안 (month 직전 4주 마감 보고 기준)
+GET {{host}}/api/stores/{{storeId}}/staffing-suggestions?month=2026-11
+Authorization: Bearer {{managerToken}}
+
+
+### ─────────────── 8. 급여 · 기타 ───────────────
 
 ### 월별 급여 계산 (관리자, 주휴수당 포함)
 GET {{host}}/api/stores/{{storeId}}/payroll?yearMonth=2026-11

@@ -14,4 +14,5 @@ WORKDIR /app
 COPY --from=build /app/build/libs/*.jar app.jar
 EXPOSE 8080
 # DB_URL이 없으면 Render가 주는 DB_HOST/DB_PORT/DB_NAME으로 JDBC URL을 만든다
-CMD ["sh", "-c", "export DB_URL=${DB_URL:-jdbc:postgresql://$DB_HOST:$DB_PORT/$DB_NAME}; exec java $JAVA_OPTS -jar app.jar"]
+# 서버 기본 시간대가 UTC라 한국 시간 오전에 '오늘'이 하루 밀리지 않도록 서울로 고정한다
+CMD ["sh", "-c", "export DB_URL=${DB_URL:-jdbc:postgresql://$DB_HOST:$DB_PORT/$DB_NAME}; exec java -Duser.timezone=Asia/Seoul $JAVA_OPTS -jar app.jar"]
