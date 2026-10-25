@@ -13,5 +13,6 @@ import java.util.List;
 public interface OpenShiftRepository extends JpaRepository<OpenShift, Long> {
     List<OpenShift> findByStoreIdAndWorkDateGreaterThanEqualOrderByWorkDateAscStartTimeAsc(Long storeId, LocalDate from);
     List<OpenShift> findBySwapRequestId(Long swapRequestId);
+    List<OpenShift> findByRequiredSkillId(Long skillId);
     List<OpenShift> findBySwapRequestIdInAndStatus(Collection<Long> swapRequestIds, OpenShiftStatus status);
 }

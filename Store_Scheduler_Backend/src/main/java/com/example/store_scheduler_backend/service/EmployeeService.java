@@ -24,6 +24,7 @@ public class EmployeeService {
     private final UserRepository userRepository;
     private final FcmService fcmService;
     private final StoreAccessGuard storeAccessGuard;
+    private final EmployeeProfileService profileService;
 
     @Transactional
     public Employee joinStore(String storeCode, String name, String phoneNumber, String username) {
@@ -109,7 +110,15 @@ public class EmployeeService {
         if (!employee.getStore().getId().equals(storeId)) {
             throw new IllegalArgumentException("해당 매장 소속 직원이 아닙니다.");
         }
+        Integer beforeWage = employee.getHourlyWage();
+        EmploymentType beforeType = employee.getEmploymentType();
         employee.updateInfo(name, phoneNumber, hourlyWage, employmentType);
+        if (hourlyWage != null && !hourlyWage.equals(beforeWage)) {
+            profileService.recordChange(employee, "시급 " + beforeWage + "원 → " + hourlyWage + "원");
+        }
+        if (employmentType != null && employmentType != beforeType) {
+            profileService.recordChange(employee, "고용 형태 " + (employmentType == EmploymentType.FULL_TIME ? "직원" : "알바") + "(으)로 변경");
+        }
     }
 
     public Employee findOne(Long employeeId) {

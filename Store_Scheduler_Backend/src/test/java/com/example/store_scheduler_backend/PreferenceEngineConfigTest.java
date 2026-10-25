@@ -5,6 +5,11 @@ import com.example.store_scheduler_backend.domain.DayOffFallback;
 import com.example.store_scheduler_backend.domain.DayOffRequest;
 import com.example.store_scheduler_backend.domain.DayOffType;
 import com.example.store_scheduler_backend.domain.Employee;
+import com.example.store_scheduler_backend.domain.EmployeePermission;
+import com.example.store_scheduler_backend.domain.EmployeeSkillLevel;
+import com.example.store_scheduler_backend.domain.Skill;
+import com.example.store_scheduler_backend.domain.SkillLevel;
+import com.example.store_scheduler_backend.domain.SkillWindowRequirement;
 import com.example.store_scheduler_backend.domain.FixedSchedule;
 import com.example.store_scheduler_backend.domain.PreferenceLevel;
 import com.example.store_scheduler_backend.domain.PreferencePriority;
@@ -19,6 +24,9 @@ import com.example.store_scheduler_backend.domain.User;
 import com.example.store_scheduler_backend.repository.AvailabilityRepository;
 import com.example.store_scheduler_backend.repository.DayOffRequestRepository;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
+import com.example.store_scheduler_backend.repository.EmployeeSkillLevelRepository;
+import com.example.store_scheduler_backend.repository.SkillRepository;
+import com.example.store_scheduler_backend.repository.SkillWindowRequirementRepository;
 import com.example.store_scheduler_backend.repository.FixedScheduleRepository;
 import com.example.store_scheduler_backend.repository.PreferenceSubmissionRepository;
 import com.example.store_scheduler_backend.repository.ShiftDayStaffingRepository;
@@ -80,6 +88,9 @@ class PreferenceEngineConfigTest {
     @Autowired ShiftDayStaffingRepository dayStaffingRepository;
     @Autowired StaffingExceptionRepository exceptionRepository;
     @Autowired DayOffRequestRepository dayOffRequestRepository;
+    @Autowired SkillRepository skillRepository;
+    @Autowired EmployeeSkillLevelRepository levelRepository;
+    @Autowired SkillWindowRequirementRepository windowRepository;
 
     private Store store;
     private Employee employee;
@@ -187,6 +198,48 @@ class PreferenceEngineConfigTest {
 
         assertThat(config.get("max_shifts_per_day")).isEqualTo(2);
         assertThat(config.get("conflicting_shifts")).isEqualTo(List.of(List.of(OPEN, MIDDLE)));
+    }
+
+    @Test
+    void 확정_등급은_등급별_키로_맡길_수_있는_일과_수습은_엔진_입력으로_넘긴다() {
+        Skill service = skillRepository.save(new Skill("응대", store));
+        employee.addSkill(service);
+        EmployeeSkillLevel level = new EmployeeSkillLevel(employee, service);
+        level.confirm(SkillLevel.MID);
+        levelRepository.save(level);
+        employee.updatePermissions(List.of(EmployeePermission.STORE_KEY));
+        employee.updateProbation(WEEK_START.plusDays(1));
+
+        Map<String, Object> employeeConfig = employeeConfig(weekly());
+
+        String key = "skill_" + service.getId();
+        assertThat((List<String>) employeeConfig.get("skills"))
+                .containsExactlyInAnyOrder(key, key + "@LOW", key + "@MID", "perm_STORE_KEY");
+        assertThat(employeeConfig.get("mentor_required_days")).isEqualTo(List.of(0, 1));
+    }
+
+    @Test
+    void 시간대_역량은_겹치는_교대_전부와_해당_요일로_넘기고_우선은_낮은_패널티다() {
+        Skill service = skillRepository.save(new Skill("응대", store));
+        windowRepository.save(new SkillWindowRequirement(store, "피크", LocalTime.of(12, 0), LocalTime.of(14, 0), service,
+                SkillLevel.HIGH, null, 1, true, List.of()));
+        windowRepository.save(new SkillWindowRequirement(store, null, LocalTime.of(10, 0), LocalTime.of(12, 0), null,
+                null, EmployeePermission.ORDERING, 1, false, List.of(DayOfWeek.TUESDAY, DayOfWeek.FRIDAY)));
+
+        List<Map<String, Object>> requirements = (List<Map<String, Object>>) weekly().get("skill_requirements");
+
+        assertThat(requirements).hasSize(2);
+        // 시작 시각 순: 10-12 발주 → 12-14 피크
+        Map<String, Object> peak = requirements.get(1);
+        assertThat(peak.get("skill")).isEqualTo("skill_" + service.getId() + "@HIGH");
+        assertThat(peak.get("shifts")).isEqualTo(List.of(OPEN, MIDDLE));
+        assertThat((List<?>) peak.get("days")).hasSize(7);
+        assertThat(peak).doesNotContainKey("weight");
+        Map<String, Object> ordering = requirements.get(0);
+        assertThat(ordering.get("skill")).isEqualTo("perm_ORDERING");
+        assertThat(ordering.get("shifts")).isEqualTo(List.of(OPEN));
+        assertThat(ordering.get("days")).isEqualTo(List.of(1, 4));
+        assertThat(ordering.get("weight")).isEqualTo(300_000);
     }
 
     private Map<String, Object> weekly() {

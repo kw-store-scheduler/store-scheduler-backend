@@ -16,6 +16,9 @@ import com.example.store_scheduler_backend.domain.ScheduleProposal;
 import com.example.store_scheduler_backend.domain.Shift;
 import com.example.store_scheduler_backend.domain.ShiftPreference;
 import com.example.store_scheduler_backend.domain.ShiftSkillRequirement;
+import com.example.store_scheduler_backend.domain.SkillLevel;
+import com.example.store_scheduler_backend.domain.SkillWindowRequirement;
+import com.example.store_scheduler_backend.domain.EmployeeSkillLevel;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.dto.ScheduleProposalResponse;
 import com.example.store_scheduler_backend.dto.ScheduleProposalResponse.Assignment;
@@ -29,6 +32,8 @@ import com.example.store_scheduler_backend.dto.ScheduleProposalResponse.Shortage
 import com.example.store_scheduler_backend.repository.AvailabilityRepository;
 import com.example.store_scheduler_backend.repository.DayOffRequestRepository;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
+import com.example.store_scheduler_backend.repository.EmployeeSkillLevelRepository;
+import com.example.store_scheduler_backend.repository.SkillWindowRequirementRepository;
 import com.example.store_scheduler_backend.repository.FixedScheduleRepository;
 import com.example.store_scheduler_backend.repository.PreferenceSubmissionRepository;
 import com.example.store_scheduler_backend.repository.ScheduleProposalRepository;
@@ -71,6 +76,9 @@ public class ScheduleAutomationService {
     private static final int DAYS_IN_WEEK = 7;
     private static final String EMPLOYEE_KEY_PREFIX = "emp_";
     private static final String SKILL_KEY_PREFIX = "skill_";
+    private static final String PERMISSION_KEY_PREFIX = "perm_";
+    // 시간대 역량 중 "우선"은 가능하면 맞추는 정도로. 필수는 엔진 기본 SKILL_W(8백만)
+    private static final int PREFERRED_SKILL_WEIGHT = 300_000;
     private static final int SOLVER_TIME_LIMIT_SECONDS = 10;
     private static final int MONTHLY_SOLVER_TIME_LIMIT_SECONDS = 20;
     private static final double NIGHT_BONUS_RATE = 0.5;
@@ -116,7 +124,9 @@ public class ScheduleAutomationService {
                                Map<Long, List<ShiftPreference>> preferencesByEmployee, Set<Long> preferenceEmployees,
                                Map<Long, List<FixedSchedule>> fixedByEmployee,
                                Map<Long, PreferenceSubmission> submissionByEmployee,
-                               StaffingPlanService.Plan staffing) {
+                               StaffingPlanService.Plan staffing,
+                               Map<Long, List<EmployeeSkillLevel>> levelsByEmployee,
+                               List<SkillWindowRequirement> windows) {
         LocalDate end() {
             return start.plusDays(numDays - 1);
         }
@@ -166,6 +176,8 @@ public class ScheduleAutomationService {
     private final PreferenceSubmissionRepository submissionRepository;
     private final FixedScheduleRepository fixedScheduleRepository;
     private final StaffingPlanService staffingPlanService;
+    private final EmployeeSkillLevelRepository levelRepository;
+    private final SkillWindowRequirementRepository windowRepository;
     private final ObjectMapper objectMapper;
     private final SubstituteFinder substituteFinder;
     private final FcmService fcmService;
@@ -264,7 +276,10 @@ public class ScheduleAutomationService {
                 fixedScheduleRepository.findByEmployee_StoreId(storeId).stream()
                         .collect(Collectors.groupingBy(f -> f.getEmployee().getId())),
                 submissionByEmployee,
-                staffingPlanService.planFor(storeId, start, end));
+                staffingPlanService.planFor(storeId, start, end),
+                levelRepository.findByEmployee_StoreId(storeId).stream()
+                        .collect(Collectors.groupingBy(l -> l.getEmployee().getId())),
+                windowRepository.findByStoreIdOrderByStartTimeAsc(storeId));
     }
 
     // 기준마다 대표 해 하나만 쓰므로 동점 대안 탐색(max_alt_solutions)은 하지 않는다
@@ -327,7 +342,16 @@ public class ScheduleAutomationService {
             }
             config.put("available_days", new ArrayList<>(availableDays));
             config.put("unavailable_slots", new ArrayList<>(unavailable));
-            config.put("skills", employee.getSkills().stream().map(sk -> SKILL_KEY_PREFIX + sk.getId()).toList());
+            config.put("skills", skillKeys(employee, input.levelsByEmployee().getOrDefault(employee.getId(), List.of())));
+            List<Integer> mentorDays = new ArrayList<>();
+            for (int day = 0; day < input.numDays(); day++) {
+                if (employee.isOnProbation(input.dateOf(day))) {
+                    mentorDays.add(day);
+                }
+            }
+            if (!mentorDays.isEmpty()) {
+                config.put("mentor_required_days", mentorDays);
+            }
             config.put("hourly", employee.getHourlyWage() != null ? employee.getHourlyWage() : 0);
             if (input.monthly()) {
                 addPersonalRules(config, input.submissionByEmployee().get(employee.getId()));
@@ -384,7 +408,9 @@ public class ScheduleAutomationService {
             config.put("conflicting_shifts", conflictingShifts(shifts));
         }
         config.put("time_limit", input.monthly() ? MONTHLY_SOLVER_TIME_LIMIT_SECONDS : SOLVER_TIME_LIMIT_SECONDS);
-        config.put("skill_requirements", toEngineSkillRequirements(input.skillRequirements(), shifts));
+        List<Map<String, Object>> skillRequirements = new ArrayList<>(toEngineSkillRequirements(input.skillRequirements(), shifts));
+        skillRequirements.addAll(toEngineWindowRequirements(input));
+        config.put("skill_requirements", skillRequirements);
         return config;
     }
 
@@ -604,6 +630,65 @@ public class ScheduleAutomationService {
                 employee.put("unavailable_slots", slots);
             }
         }
+    }
+
+    // 확정 등급이 있으면 그 등급 이하 키도 함께 넘겨 "응대 중 이상" 같은 조건을 엔진이 스킬 보유로만 판단하게 한다
+    // 혼자 맡길 수 있는 일도 같은 방식의 키로 넘긴다
+    private List<String> skillKeys(Employee employee, List<EmployeeSkillLevel> levels) {
+        List<String> keys = new ArrayList<>(employee.getSkills().stream().map(sk -> SKILL_KEY_PREFIX + sk.getId()).toList());
+        for (EmployeeSkillLevel level : levels) {
+            if (level.getLevel() == null) {
+                continue;
+            }
+            for (SkillLevel threshold : List.of(SkillLevel.LOW, SkillLevel.MID, SkillLevel.HIGH)) {
+                if (level.getLevel().atLeast(threshold)) {
+                    keys.add(SKILL_KEY_PREFIX + level.getSkill().getId() + "@" + threshold);
+                }
+            }
+        }
+        employee.getPermissionList().forEach(p -> keys.add(PERMISSION_KEY_PREFIX + p.name()));
+        return keys;
+    }
+
+    // 시간대와 겹치는 교대 전부, 그 요일에만. 우선 역량은 낮은 패널티로
+    private List<Map<String, Object>> toEngineWindowRequirements(PeriodInput input) {
+        List<Map<String, Object>> requirements = new ArrayList<>();
+        for (SkillWindowRequirement w : input.windows()) {
+            List<Integer> covering = new ArrayList<>();
+            for (int s = 0; s < input.shifts().size(); s++) {
+                Shift shift = input.shifts().get(s);
+                int start = shift.getStartTime().toSecondOfDay() / 60;
+                if (start < w.getEndTime().toSecondOfDay() / 60 && w.getStartTime().toSecondOfDay() / 60 < endMinutes(shift)) {
+                    covering.add(s);
+                }
+            }
+            List<Integer> days = new ArrayList<>();
+            for (int day = 0; day < input.numDays(); day++) {
+                if (w.appliesOn(input.dateOf(day).getDayOfWeek())) {
+                    days.add(day);
+                }
+            }
+            if (covering.isEmpty() || days.isEmpty()) {
+                continue;
+            }
+            Map<String, Object> requirement = new HashMap<>();
+            requirement.put("shifts", covering);
+            requirement.put("days", days);
+            requirement.put("skill", windowKey(w));
+            requirement.put("count", w.getRequiredCount());
+            if (!w.isMandatory()) {
+                requirement.put("weight", PREFERRED_SKILL_WEIGHT);
+            }
+            requirements.add(requirement);
+        }
+        return requirements;
+    }
+
+    private static String windowKey(SkillWindowRequirement w) {
+        if (w.getPermission() != null) {
+            return PERMISSION_KEY_PREFIX + w.getPermission().name();
+        }
+        return SKILL_KEY_PREFIX + w.getSkill().getId() + (w.getMinLevel() != null ? "@" + w.getMinLevel() : "");
     }
 
     // 스킬 이름은 바뀔 수 있어서 엔진에는 id로 넘긴다
@@ -950,8 +1035,14 @@ public class ScheduleAutomationService {
         for (ShiftSkillRequirement r : input.skillRequirements()) {
             skillNames.put(SKILL_KEY_PREFIX + r.getSkill().getId(), r.getSkill().getName());
         }
+        for (SkillWindowRequirement w : input.windows()) {
+            String name = w.getPermission() != null ? w.getPermission().getLabel()
+                    : w.getSkill().getName() + (w.getMinLevel() != null ? " " + levelLabel(w.getMinLevel()) + " 이상" : "");
+            skillNames.put(windowKey(w), (w.getLabel() != null ? w.getLabel() + " " : "") + name);
+        }
         return ((List<Map<String, Object>>) report).stream()
-                .filter(r -> isOpen(input, shifts.get(toInt(r.get("shift"))), toInt(r.get("day"))))
+                .filter(r -> ((List<Object>) r.getOrDefault("shifts", List.of(r.get("shift")))).stream()
+                        .anyMatch(s -> isOpen(input, shifts.get(toInt(s)), toInt(r.get("day")))))
                 .map(r -> new Shortage(
                         input.dateOf(toInt(r.get("day"))),
                         shifts.get(toInt(r.get("shift"))).getName(),
@@ -959,6 +1050,15 @@ public class ScheduleAutomationService {
                         toInt(r.get("actual")),
                         skillNames.getOrDefault((String) r.get("skill"), (String) r.get("skill"))))
                 .toList();
+    }
+
+    private static String levelLabel(SkillLevel level) {
+        return switch (level) {
+            case NONE -> "없음";
+            case LOW -> "하";
+            case MID -> "중";
+            case HIGH -> "상";
+        };
     }
 
     // 자정을 넘기는 근무도 양수로 계산. 엔진이 정수 시간만 받아서 30분 단위는 반올림한다

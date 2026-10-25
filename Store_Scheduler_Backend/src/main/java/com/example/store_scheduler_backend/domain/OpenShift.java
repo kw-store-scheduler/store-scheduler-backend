@@ -79,6 +79,10 @@ public class OpenShift {
         return openShift;
     }
 
+    public void clearRequiredSkill() {
+        this.requiredSkill = null;
+    }
+
     public boolean isPastDeadline(LocalDateTime now) {
         LocalDateTime deadline = applyDeadline != null ? applyDeadline : LocalDateTime.of(workDate, startTime);
         return now.isAfter(deadline);
