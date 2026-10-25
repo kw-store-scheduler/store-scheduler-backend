@@ -1,0 +1,36 @@
+name: test
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: Store_Scheduler_Backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # 실제 엔진 테스트용. 없으면 해당 테스트가 건너뛰어진다
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install ortools==9.15.6755
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - run: ./gradlew test
+
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report
+          path: Store_Scheduler_Backend/build/reports/tests/test

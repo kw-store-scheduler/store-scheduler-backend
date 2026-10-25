@@ -1,0 +1,5 @@
+**/build
+**/.gradle
+**/.idea
+shiftfair_eval_kit
+*.png
