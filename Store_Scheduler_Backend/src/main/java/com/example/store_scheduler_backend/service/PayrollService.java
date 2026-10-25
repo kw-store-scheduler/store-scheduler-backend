@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.DayOfWeek;
 import java.time.Duration;
 import java.time.LocalDate;
+import java.time.LocalTime;
 import java.time.YearMonth;
 import java.time.temporal.TemporalAdjusters;
 import java.util.ArrayList;
@@ -32,6 +33,7 @@ public class PayrollService {
     private final EmployeeRepository employeeRepository;
     private final ScheduleRepository scheduleRepository;
     private final StoreAccessGuard storeAccessGuard;
+    private final LaborPolicy laborPolicy;
 
     public List<EmployeePayroll> calculateMonthlyPayroll(Long storeId, YearMonth yearMonth, String managerUsername) {
         storeAccessGuard.verifyOwner(storeId, managerUsername);
@@ -52,11 +54,12 @@ public class PayrollService {
         return calculateForEmployee(employee, yearMonth.atDay(1), yearMonth.atEndOfMonth());
     }
 
-    private EmployeePayroll calculateForEmployee(Employee employee, LocalDate start, LocalDate end) {
+    EmployeePayroll calculateForEmployee(Employee employee, LocalDate start, LocalDate end) {
         List<Schedule> schedules = scheduleRepository.findByEmployeeIdAndWorkDateBetweenOrderByWorkDateAsc(
                 employee.getId(), start, end);
 
         long totalMinutes = 0;
+        long nightMinutes = 0;
         Map<LocalDate, Long> weeklyMinutes = new HashMap<>();
         for (Schedule schedule : schedules) {
             long minutes = Duration.between(schedule.getStartTime(), schedule.getEndTime()).toMinutes();
@@ -64,6 +67,7 @@ public class PayrollService {
                 minutes += 24 * 60;
             }
             totalMinutes += minutes;
+            nightMinutes += nightMinutes(schedule.getStartTime(), minutes);
 
             LocalDate weekStart = schedule.getWorkDate().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
             weeklyMinutes.merge(weekStart, minutes, Long::sum);
@@ -80,6 +84,17 @@ public class PayrollService {
         }
         long weeklyHolidayPay = Math.round(weeklyHolidayMinutes / 60.0 * hourlyWage);
 
+        // 상시 5인 이상이면 야간(22~06시)과 주 40시간을 넘는 연장근무에 50% 가산
+        long nightPay = 0;
+        long overtimePay = 0;
+        if (laborPolicy.premiumApplies(employee.getStore())) {
+            nightPay = Math.round(nightMinutes / 60.0 * hourlyWage * LaborPolicy.PREMIUM_RATE);
+            long overtimeMinutes = weeklyMinutes.values().stream()
+                    .mapToLong(m -> Math.max(0, m - LaborPolicy.WEEKLY_REGULAR_MINUTES))
+                    .sum();
+            overtimePay = Math.round(overtimeMinutes / 60.0 * hourlyWage * LaborPolicy.PREMIUM_RATE);
+        }
+
         return new EmployeePayroll(
                 employee.getId(),
                 employee.getName(),
@@ -87,8 +102,22 @@ public class PayrollService {
                 hourlyWage,
                 regularWage,
                 weeklyHolidayPay,
-                regularWage + weeklyHolidayPay
+                nightPay,
+                overtimePay,
+                regularWage + weeklyHolidayPay + nightPay + overtimePay
         );
+    }
+
+    // 시작 시각부터 minutes 동안 중 22:00~06:00에 걸친 분
+    static long nightMinutes(LocalTime start, long minutes) {
+        long from = start.toSecondOfDay() / 60;
+        long to = from + minutes;
+        long[][] nights = {{0, 6 * 60}, {22 * 60, 30 * 60}, {46 * 60, 54 * 60}};
+        long sum = 0;
+        for (long[] n : nights) {
+            sum += Math.max(0, Math.min(to, n[1]) - Math.max(from, n[0]));
+        }
+        return sum;
     }
 
     @Getter
@@ -100,6 +129,8 @@ public class PayrollService {
         private int hourlyWage;
         private long regularWage;
         private long weeklyHolidayPay;
+        private long nightPay;
+        private long overtimePay;
         private long totalPay;
     }
 }

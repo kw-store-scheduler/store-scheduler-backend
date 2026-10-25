@@ -5,6 +5,9 @@ import com.example.store_scheduler_backend.domain.DayOffFallback;
 import com.example.store_scheduler_backend.domain.DayOffRequest;
 import com.example.store_scheduler_backend.domain.DayOffType;
 import com.example.store_scheduler_backend.domain.Employee;
+import com.example.store_scheduler_backend.domain.ExceptionCategory;
+import com.example.store_scheduler_backend.domain.Schedule;
+import com.example.store_scheduler_backend.domain.ScheduleCycle;
 import com.example.store_scheduler_backend.domain.EmploymentType;
 import com.example.store_scheduler_backend.domain.FixedScheduleCategory;
 import com.example.store_scheduler_backend.domain.ShiftAttitude;
@@ -37,11 +40,14 @@ import com.example.store_scheduler_backend.repository.ShiftDayStaffingRepository
 import com.example.store_scheduler_backend.repository.ShiftPreferenceRepository;
 import com.example.store_scheduler_backend.repository.ShiftRepository;
 import com.example.store_scheduler_backend.repository.StaffingExceptionRepository;
+import com.example.store_scheduler_backend.repository.ScheduleRepository;
 import com.example.store_scheduler_backend.repository.StoreRepository;
 import com.example.store_scheduler_backend.repository.UnavailablePeriodRepository;
 import com.example.store_scheduler_backend.repository.UserRepository;
 import com.example.store_scheduler_backend.service.PythonEngineRunner;
 import com.example.store_scheduler_backend.service.ScheduleAutomationService;
+import com.example.store_scheduler_backend.service.SchedulePlanService;
+import com.example.store_scheduler_backend.service.ScheduleProposalService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -52,6 +58,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.DayOfWeek;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.LocalTime;
 import java.time.YearMonth;
 import java.util.List;
@@ -97,6 +104,9 @@ class PreferenceEngineConfigTest {
     @Autowired EmployeeSkillLevelRepository levelRepository;
     @Autowired SkillWindowRequirementRepository windowRepository;
     @Autowired UnavailablePeriodRepository unavailablePeriodRepository;
+    @Autowired ScheduleProposalService proposalService;
+    @Autowired SchedulePlanService schedulePlanService;
+    @Autowired ScheduleRepository scheduleRepository;
 
     private Store store;
     private Employee employee;
@@ -307,6 +317,54 @@ class PreferenceEngineConfigTest {
                 Map.of("day", 0, "type", "prefer", "weight", 9_000_000),
                 Map.of("day", 1, "type", "prefer"),
                 Map.of("day", 1, "type", "must", "shifts", List.of(MIDDLE, CLOSE), "weight", 9_000_000));
+    }
+
+    @Test
+    void 매장_연속_근무_한도와_평소_대비_추가_인원_공휴일을_넘긴다() {
+        store.updateOperations(5, null, null, null, null, null);
+        exceptionRepository.save(new StaffingException(store, WEEK_START.plusDays(1), WEEK_START.plusDays(2), close, null, null, 1,
+                ExceptionCategory.SALE, null, null, "세일"));
+
+        Map<String, Object> config = weekly();
+
+        assertThat(config.get("consecutive_days_limit")).isEqualTo(5);
+        List<List<Integer>> target = (List<List<Integer>>) config.get("target_staff_by_day");
+        assertThat(target.get(1).get(CLOSE)).isEqualTo(2);
+        assertThat(target.get(2).get(CLOSE)).isEqualTo(2);
+        assertThat(target.get(3).get(CLOSE)).isEqualTo(1);
+    }
+
+    @Test
+    void 확정하면_예외일_교대_시간을_반영하고_직원마다_확인_여부를_남긴다() {
+        exceptionRepository.save(new StaffingException(store, WEEK_START, null, close, null, null, null,
+                ExceptionCategory.SEASON, null, LocalTime.of(23, 0), "연말"));
+        when(pythonEngineRunner.run(any())).thenReturn(Map.of("status", "OPTIMAL", "cost", 0, "solve_ms", 1,
+                "shortage_report", List.of(),
+                "schedule", List.of(Map.of("employee_id", "emp_" + employee.getId(),
+                        "assignments", List.of(Map.of("day", 0, "shift", CLOSE))))));
+
+        Long proposalId = automationService.generateProposal(store.getId(), WEEK_START, "owner").getProposalId();
+        proposalService.confirm(store.getId(), proposalId, 0, "owner");
+
+        Schedule saved = scheduleRepository.findByStoreIdAndWorkDateBetween(store.getId(), WEEK_START, WEEK_START).get(0);
+        assertThat(saved.getEndTime()).isEqualTo(LocalTime.of(23, 0));
+        assertThat(saved.getAssignmentReasons()).contains("예외일 시간 변경 17:00~23:00");
+        assertThat(proposalService.findAcknowledgements(store.getId(), proposalId, "owner"))
+                .singleElement().satisfies(a -> assertThat(a.getSeenAt()).isNull());
+        proposalService.acknowledge(store.getId(), "yuna");
+        assertThat(proposalService.remindUnseen(store.getId(), proposalId, "owner")).isZero();
+    }
+
+    @Test
+    void 자동_생성은_생성_시각이_지나면_다음_기간_후보안을_한_번만_만든다() {
+        store.updateOperations(null, null, ScheduleCycle.WEEKLY, true, 2, 9);
+        LocalDate nextMonday = LocalDate.now().with(java.time.temporal.TemporalAdjusters.next(DayOfWeek.MONDAY));
+        LocalDateTime generateAt = nextMonday.minusDays(2).atTime(9, 0);
+
+        assertThat(schedulePlanService.generateDue(generateAt.minusMinutes(1))).isZero();
+        assertThat(schedulePlanService.generateDue(generateAt)).isEqualTo(1);
+        clearInvocations(pythonEngineRunner);
+        assertThat(schedulePlanService.generateDue(generateAt.plusHours(1))).isZero();
     }
 
     private Map<String, Object> employeeConfigOf(Map<String, Object> config, Employee target) {

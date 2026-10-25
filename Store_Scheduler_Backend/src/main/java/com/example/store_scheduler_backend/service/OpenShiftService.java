@@ -2,7 +2,6 @@ package com.example.store_scheduler_backend.service;
 
 import com.example.store_scheduler_backend.domain.ApplicationStatus;
 import com.example.store_scheduler_backend.domain.Employee;
-import com.example.store_scheduler_backend.domain.EmployeeStatus;
 import com.example.store_scheduler_backend.domain.OpenShift;
 import com.example.store_scheduler_backend.domain.OpenShiftKind;
 import com.example.store_scheduler_backend.domain.OpenShiftStatus;
@@ -12,7 +11,6 @@ import com.example.store_scheduler_backend.domain.Skill;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.domain.SwapRequest;
 import com.example.store_scheduler_backend.domain.SwapStatus;
-import com.example.store_scheduler_backend.repository.EmployeeRepository;
 import com.example.store_scheduler_backend.repository.OpenShiftRepository;
 import com.example.store_scheduler_backend.repository.ScheduleRepository;
 import com.example.store_scheduler_backend.repository.ShiftApplicationRepository;
@@ -51,8 +49,8 @@ public class OpenShiftService {
     private final FcmService fcmService;
     private final SwapAssignment swapAssignment;
     private final SkillRepository skillRepository;
-    private final EmployeeRepository employeeRepository;
     private final SwapRequestRepository swapRequestRepository;
+    private final LaborPolicy laborPolicy;
 
     // eligible·blocker·expectedPay·myStatus는 직원이 볼 때만 채운다
     public record BoardItem(OpenShift openShift, int applicantCount, Boolean eligible, String blocker, Long expectedPay,
@@ -68,8 +66,7 @@ public class OpenShiftService {
                             boolean overtime) {
     }
 
-    private static final int WEEKLY_REGULAR_MINUTES = 40 * 60;
-    private static final int OVERTIME_EMPLOYEE_THRESHOLD = 5;
+
 
     public record Broadcast(OpenShift openShift, int notifiedCount) {
     }
@@ -193,7 +190,7 @@ public class OpenShiftService {
         ShiftApplication application = existing.orElseGet(() -> new ShiftApplication(openShift, me));
         application.reapply();
         applicationRepository.save(application);
-        fcmService.sendToDevice(openShift.getStore().getOwner().getDeviceToken(), "빈 근무 지원",
+        fcmService.send(openShift.getStore().getOwner(), "빈 근무 지원",
                 me.getDisplayName() + "님이 " + openShift.getWorkDate() + " " + openShift.getStartTime() + " 근무에 지원했습니다.");
         return application;
     }
@@ -210,8 +207,7 @@ public class OpenShiftService {
     public List<Applicant> findApplications(Long storeId, Long openShiftId, String managerUsername) {
         storeAccessGuard.verifyOwner(storeId, managerUsername);
         OpenShift openShift = findInStore(storeId, openShiftId);
-        boolean overtimeApplies = employeeRepository.countByStoreIdAndStatus(storeId, EmployeeStatus.APPROVED)
-                >= OVERTIME_EMPLOYEE_THRESHOLD;
+        boolean overtimeApplies = laborPolicy.premiumApplies(openShift.getStore());
         long shiftMinutes = minutes(openShift.getStartTime(), openShift.getEndTime());
         LocalDate weekStart = openShift.getWorkDate().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
         YearMonth month = YearMonth.from(openShift.getWorkDate());
@@ -222,9 +218,10 @@ public class OpenShiftService {
                                     e.getId(), weekStart, weekStart.plusDays(6)).stream()
                             .mapToLong(s -> minutes(s.getStartTime(), s.getEndTime()))
                             .sum() + shiftMinutes;
-                    long overtimeMinutes = overtimeApplies ? Math.min(shiftMinutes, Math.max(0, weekMinutes - WEEKLY_REGULAR_MINUTES)) : 0;
+                    long overtimeMinutes = overtimeApplies
+                            ? Math.min(shiftMinutes, Math.max(0, weekMinutes - LaborPolicy.WEEKLY_REGULAR_MINUTES)) : 0;
                     int wage = e.getHourlyWage() != null ? e.getHourlyWage() : 0;
-                    long pay = Math.round(shiftMinutes / 60.0 * wage + overtimeMinutes / 60.0 * wage * 0.5);
+                    long pay = Math.round(shiftMinutes / 60.0 * wage + overtimeMinutes / 60.0 * wage * LaborPolicy.PREMIUM_RATE);
                     return new Applicant(a, monthExtraCount(e, month), Math.round(weekMinutes / 6.0) / 10.0, pay,
                             overtimeMinutes > 0);
                 })
@@ -298,7 +295,7 @@ public class OpenShiftService {
         if (!openShift.isOpen()) {
             rejectRemaining(openShift);
         }
-        fcmService.sendToDevice(applicant.getUser().getDeviceToken(), "빈 근무 승인",
+        fcmService.send(applicant.getUser(), "빈 근무 승인",
                 openShift.getWorkDate() + " " + openShift.getStartTime() + " 근무가 내 근무표에 추가되었습니다.");
         return application;
     }
@@ -322,7 +319,7 @@ public class OpenShiftService {
                 .toList();
         String title = openShift.getKind() == OpenShiftKind.VACANCY ? "대타 구해요" : "추가 근무 모집";
         for (SubstituteFinder.Candidate c : eligible) {
-            fcmService.sendToDevice(c.employee().getUser().getDeviceToken(), title,
+            fcmService.send(c.employee().getUser(), title,
                     openShift.getWorkDate() + " " + openShift.getStartTime() + "~" + openShift.getEndTime() + " " + openShift.getTitle());
         }
         return eligible.size();

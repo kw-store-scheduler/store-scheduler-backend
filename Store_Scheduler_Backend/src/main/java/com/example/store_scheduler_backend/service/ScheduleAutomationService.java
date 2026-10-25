@@ -99,7 +99,6 @@ public class ScheduleAutomationService {
     private static final int PROMISE_POINT_WEIGHT = 1_000;
     private static final int MINOR_MAX_SHIFT_MINUTES = 7 * 60;
     private static final int MAX_WEEKLY_HOURS = 52;
-    private static final int MAX_CONSECUTIVE_DAYS = 4;
     private static final int MAX_WARNINGS = 30;
     // 우선순위 1~5위의 패널티 배율. 순위에 없는 항목은 1배
     private static final double[] PRIORITY_SCALES = {2.0, 1.6, 1.3, 1.1, 1.0};
@@ -198,6 +197,16 @@ public class ScheduleAutomationService {
         return generate(storeId, weekStart, DAYS_IN_WEEK, managerUsername);
     }
 
+    // 2주 치 근무표 후보안 (학기·시험 기간에 맞추는 매장)
+    @Transactional
+    public ScheduleProposalResponse generateBiweeklyProposal(Long storeId, LocalDate weekStart, String managerUsername) {
+        if (weekStart.getDayOfWeek() != DayOfWeek.MONDAY) {
+            storeAccessGuard.verifyOwner(storeId, managerUsername);
+            throw new IllegalArgumentException("근무표 시작일(weekStart)은 월요일이어야 합니다.");
+        }
+        return generate(storeId, weekStart, 2 * DAYS_IN_WEEK, managerUsername);
+    }
+
     // 한 달 치 근무표 후보안. 직원이 제출한 개인 근무 규칙(주말 횟수, 근무량, 연속 근무, 근무 리듬)은 월간 생성에만 쓴다
     @Transactional
     public ScheduleProposalResponse generateMonthlyProposal(Long storeId, YearMonth month, String managerUsername) {
@@ -245,7 +254,7 @@ public class ScheduleAutomationService {
         Notice notice = ScheduleProposalResponse.noticeFor(candidates, shortages);
         if (notice.needsAttention()) {
             String period = input.monthly() ? YearMonth.from(start) + " 근무표: " : start + " 주 근무표: ";
-            fcmService.sendToDevice(store.getOwner().getDeviceToken(), "근무표 후보안 확인 필요", period + notice.summary());
+            fcmService.send(store.getOwner(), "근무표 후보안 확인 필요", period + notice.summary());
         }
         return new ScheduleProposalResponse(proposal.getId(), true, status,
                 ScheduleProposalResponse.messageFor(candidates.size(), shortages.size()),
@@ -422,13 +431,22 @@ public class ScheduleAutomationService {
         config.put("weeks", calendarWeeks(input));
         List<Integer> weekendDays = weekendDays(input);
         config.put("weekend_days", weekendDays);
-        // 주말 근무 횟수를 고르게 나누는 데 엔진의 공휴일 편차 항목을 쓴다
-        config.put("holiday_indices", weekendDays);
+        // 주말·공휴일 근무 횟수를 고르게 나누는 데 엔진의 공휴일 편차 항목을 쓴다
+        List<Integer> holidayIndices = new ArrayList<>(weekendDays);
+        for (int day = 0; day < input.numDays(); day++) {
+            if (KoreanHolidays.isHoliday(input.dateOf(day)) && !holidayIndices.contains(day)) {
+                holidayIndices.add(day);
+            }
+        }
+        config.put("holiday_indices", holidayIndices);
         config.put("open_shifts", openShifts(shifts));
         config.put("close_shifts", closeShifts(shifts));
         if (input.store().isSplitShiftAllowed()) {
             config.put("max_shifts_per_day", 2);
             config.put("conflicting_shifts", conflictingShifts(shifts));
+        }
+        if (input.store().getMaxConsecutiveDays() != null) {
+            config.put("consecutive_days_limit", input.store().getMaxConsecutiveDays());
         }
         config.put("time_limit", input.monthly() ? MONTHLY_SOLVER_TIME_LIMIT_SECONDS : SOLVER_TIME_LIMIT_SECONDS);
         List<Map<String, Object>> skillRequirements = new ArrayList<>(toEngineSkillRequirements(input.skillRequirements(), shifts));
@@ -1054,7 +1072,7 @@ public class ScheduleAutomationService {
                 preferenceRate, weekendGap, countLaborLawViolations(assignments, input), coverage, warnings);
     }
 
-    // 엔진이 하드 제약으로 막는 항목을 결과에서 다시 확인한다. 정상이면 0
+    // 엔진이 하드 제약으로 막는 항목(주 52시간, 매장 연속 근무 한도, 미성년자)을 결과에서 다시 확인한다. 정상이면 0
     private int countLaborLawViolations(List<Assignment> assignments, PeriodInput input) {
         Map<Long, Employee> employeeById = input.employees().stream()
                 .collect(Collectors.toMap(Employee::getId, Function.identity()));
@@ -1074,7 +1092,7 @@ public class ScheduleAutomationService {
             violations += (int) weeklyHours.values().stream().filter(h -> h > MAX_WEEKLY_HOURS).count();
             for (LocalDate day : workDays) {
                 boolean fiveInRow = true;
-                for (int i = 1; i <= MAX_CONSECUTIVE_DAYS; i++) {
+                for (int i = 1; i <= input.store().getMaxConsecutiveDaysOrDefault(); i++) {
                     if (!workDays.contains(day.plusDays(i))) {
                         fiveInRow = false;
                         break;

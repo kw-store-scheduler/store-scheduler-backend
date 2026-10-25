@@ -11,4 +11,5 @@ import java.util.List;
 public interface StaffingExceptionRepository extends JpaRepository<StaffingException, Long> {
     List<StaffingException> findByStoreIdAndDateBetweenOrderByDateAsc(Long storeId, LocalDate from, LocalDate to);
     List<StaffingException> findByShiftId(Long shiftId);
+    List<StaffingException> findByStoreIdAndDateLessThanEqualOrderByDateAsc(Long storeId, LocalDate to);
 }

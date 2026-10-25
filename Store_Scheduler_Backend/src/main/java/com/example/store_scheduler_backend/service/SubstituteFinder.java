@@ -12,10 +12,12 @@ import com.example.store_scheduler_backend.domain.PreferenceLevel;
 import com.example.store_scheduler_backend.domain.Schedule;
 import com.example.store_scheduler_backend.domain.ShiftPreference;
 import com.example.store_scheduler_backend.domain.Skill;
+import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.repository.AvailabilityRepository;
 import com.example.store_scheduler_backend.repository.DayOffRequestRepository;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
 import com.example.store_scheduler_backend.repository.FixedScheduleRepository;
+import com.example.store_scheduler_backend.repository.StoreRepository;
 import com.example.store_scheduler_backend.repository.UnavailablePeriodRepository;
 import com.example.store_scheduler_backend.repository.PreferenceSubmissionRepository;
 import com.example.store_scheduler_backend.repository.ShiftPreferenceRepository;
@@ -46,7 +48,8 @@ import java.util.stream.Collectors;
 public class SubstituteFinder {
 
     private static final int MAX_WEEKLY_HOURS = 52;
-    private static final int MAX_CONSECUTIVE_DAYS = 4;
+    // 연속 근무 검사를 위해 앞뒤로 읽어 둘 근무 일수 (매장 연속 근무 한도의 최댓값 이상)
+    private static final int SLOT_WINDOW_DAYS = 7;
 
     private final EmployeeRepository employeeRepository;
     private final AvailabilityRepository availabilityRepository;
@@ -57,6 +60,7 @@ public class SubstituteFinder {
     private final PreferenceSubmissionRepository submissionRepository;
     private final FixedScheduleRepository fixedScheduleRepository;
     private final UnavailablePeriodRepository periodRepository;
+    private final StoreRepository storeRepository;
     private static final LocalTime END_OF_DAY = LocalTime.of(23, 59);
 
     // 그달 희망을 제출했거나 칸을 고른 직원은 요일별 가용 시간 대신 제출한 칸으로 판단한다
@@ -99,9 +103,9 @@ public class SubstituteFinder {
     private Map<Long, List<WorkSlot>> loadSlots(Long storeId, LocalDate date, LocalDate proposalStart, LocalDate proposalEnd,
                                                 List<WorkSlot> proposedWeek) {
         LocalDate weekStart = date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
-        LocalDate from = weekStart.isBefore(date.minusDays(MAX_CONSECUTIVE_DAYS)) ? weekStart : date.minusDays(MAX_CONSECUTIVE_DAYS);
+        LocalDate from = weekStart.isBefore(date.minusDays(SLOT_WINDOW_DAYS)) ? weekStart : date.minusDays(SLOT_WINDOW_DAYS);
         LocalDate weekEnd = weekStart.plusDays(6);
-        LocalDate to = weekEnd.isAfter(date.plusDays(MAX_CONSECUTIVE_DAYS)) ? weekEnd : date.plusDays(MAX_CONSECUTIVE_DAYS);
+        LocalDate to = weekEnd.isAfter(date.plusDays(SLOT_WINDOW_DAYS)) ? weekEnd : date.plusDays(SLOT_WINDOW_DAYS);
 
         List<WorkSlot> slots = new ArrayList<>(proposedWeek);
         for (Schedule schedule : scheduleRepository.findByStoreIdAndWorkDateBetween(storeId, from, to)) {
@@ -128,6 +132,8 @@ public class SubstituteFinder {
                 .collect(Collectors.toMap(r -> r.getEmployee().getId(), DayOffRequest::getType));
         Set<Long> missingSkillIds = findMissingSkillIds(storeId, date, start, end, excludeEmployeeId, slotsByEmployee);
         MonthPreferences preferences = loadPreferences(storeId, date);
+        int consecutiveLimit = storeRepository.findById(storeId).map(Store::getMaxConsecutiveDaysOrDefault)
+                .orElse(Store.DEFAULT_MAX_CONSECUTIVE_DAYS);
 
         List<Candidate> candidates = new ArrayList<>();
         for (Employee employee : employeeRepository.findByStoreIdAndStatus(storeId, EmployeeStatus.APPROVED)) {
@@ -144,7 +150,7 @@ public class SubstituteFinder {
             Optional<String> blocker = dayOff == DayOffType.MUST
                     ? Optional.of("필수 휴무 신청일")
                     : findBlocker(employee, availabilityByEmployee.get(employee.getId()), preferences, own, date, start, end,
-                    weeklyHours + shiftHours);
+                    weeklyHours + shiftHours, consecutiveLimit);
             // 수습 중이면 같은 교대에 수습이 아닌 직원이 있어야 한다
             if (blocker.isEmpty() && employee.isOnProbation(date) && slotsByEmployee.values().stream()
                     .flatMap(List::stream)
@@ -263,7 +269,7 @@ public class SubstituteFinder {
 
     private Optional<String> findBlocker(Employee employee, Availability availability, MonthPreferences preferences,
                                          List<WorkSlot> own, LocalDate date, LocalTime start, LocalTime end,
-                                         int weeklyHoursWithShift) {
+                                         int weeklyHoursWithShift, int consecutiveLimit) {
         if (employee.isMinor() && ScheduleAutomationService.isRestrictedForMinor(start, end)) {
             return Optional.of("미성년자 근무 제한(22시~06시, 하루 7시간 초과)");
         }
@@ -301,17 +307,17 @@ public class SubstituteFinder {
         if (weeklyHoursWithShift > MAX_WEEKLY_HOURS) {
             return Optional.of("주 52시간 초과");
         }
-        if (wouldExceedConsecutiveDays(workDays, date)) {
-            return Optional.of("연속 5일 근무가 됨");
+        if (wouldExceedConsecutiveDays(workDays, date, consecutiveLimit)) {
+            return Optional.of("연속 " + (consecutiveLimit + 1) + "일 근무가 됨");
         }
         return Optional.empty();
     }
 
-    private boolean wouldExceedConsecutiveDays(Set<LocalDate> workDays, LocalDate date) {
-        for (int offset = -MAX_CONSECUTIVE_DAYS; offset <= 0; offset++) {
+    private boolean wouldExceedConsecutiveDays(Set<LocalDate> workDays, LocalDate date, int limit) {
+        for (int offset = -limit; offset <= 0; offset++) {
             LocalDate windowStart = date.plusDays(offset);
             boolean allWorked = true;
-            for (int i = 0; i <= MAX_CONSECUTIVE_DAYS; i++) {
+            for (int i = 0; i <= limit; i++) {
                 LocalDate day = windowStart.plusDays(i);
                 if (!day.equals(date) && !workDays.contains(day)) {
                     allWorked = false;

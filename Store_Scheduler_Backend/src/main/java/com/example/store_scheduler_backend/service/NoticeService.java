@@ -50,7 +50,7 @@ public class NoticeService {
         Store store = storeAccessGuard.verifyOwner(storeId, managerUsername);
         Notice notice = noticeRepository.save(new Notice(store, title, content, pinned));
         employeeRepository.findByStoreIdAndStatus(storeId, EmployeeStatus.APPROVED)
-                .forEach(e -> fcmService.sendToDevice(e.getUser().getDeviceToken(), "새 공지", title));
+                .forEach(e -> fcmService.send(e.getUser(), "새 공지", title));
         return notice;
     }
 

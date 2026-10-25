@@ -1,5 +1,7 @@
 package com.example.store_scheduler_backend.service;
 
+import com.example.store_scheduler_backend.domain.User;
+import com.example.store_scheduler_backend.repository.NotificationRepository;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.firebase.FirebaseApp;
 import com.google.firebase.FirebaseOptions;
@@ -19,6 +21,12 @@ import java.nio.charset.StandardCharsets;
 
 @Service
 public class FcmService {
+
+    private final NotificationRepository notificationRepository;
+
+    public FcmService(NotificationRepository notificationRepository) {
+        this.notificationRepository = notificationRepository;
+    }
 
     @Value("${fcm.credentials:}")
     private String credentialsJson;
@@ -49,6 +57,18 @@ public class FcmService {
             return new ByteArrayInputStream(credentialsJson.getBytes(StandardCharsets.UTF_8));
         }
         return new ClassPathResource(credentialPath).getInputStream();
+    }
+
+    // 알림함에 남기고, 사용자가 알림을 켜 두었으면 푸시도 보낸다
+    public void send(User user, String title, String body) {
+        if (user == null) {
+            return;
+        }
+        // Firebase에도 Notification 클래스가 있어 전체 이름으로 쓴다
+        notificationRepository.save(new com.example.store_scheduler_backend.domain.Notification(user, title, body));
+        if (user.isNotificationsEnabled()) {
+            sendToDevice(user.getDeviceToken(), title, body);
+        }
     }
 
     public void sendToDevice(String deviceToken, String title, String body) {

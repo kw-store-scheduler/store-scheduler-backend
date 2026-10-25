@@ -9,6 +9,7 @@ import com.example.store_scheduler_backend.domain.FixedSchedule;
 import com.example.store_scheduler_backend.domain.Skill;
 import com.example.store_scheduler_backend.domain.SkillLevel;
 import com.example.store_scheduler_backend.domain.SkillWindowRequirement;
+import com.example.store_scheduler_backend.domain.StaffPosition;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.repository.EmployeeChangeLogRepository;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
@@ -86,7 +87,7 @@ public class EmployeeProfileService {
             levelRepository.save(row);
         }
         if (inputs.stream().anyMatch(i -> i.level() != null)) {
-            fcmService.sendToDevice(me.getStore().getOwner().getDeviceToken(), "역량 확인 요청",
+            fcmService.send(me.getStore().getOwner(), "역량 확인 요청",
                     me.getDisplayName() + "님이 역량을 신청했어요. 확인해주세요.");
         }
         return new Profile(me, skillStates(me), List.of());
@@ -143,9 +144,14 @@ public class EmployeeProfileService {
     // 점주: 혼자 맡길 수 있는 일, 수습 기간, 근로계약 주 시간. null인 항목은 바꾸지 않는다 (수습을 없애려면 clearProbation)
     @Transactional
     public Profile updateProfile(Long storeId, Long employeeId, List<EmployeePermission> permissions, LocalDate probationUntil,
-                                 boolean clearProbation, Integer contractMin, Integer contractMax, String managerUsername) {
+                                 boolean clearProbation, Integer contractMin, Integer contractMax, StaffPosition position,
+                                 String managerUsername) {
         storeAccessGuard.verifyOwner(storeId, managerUsername);
         Employee employee = storeEmployee(storeId, employeeId);
+        if (position != null && position != employee.getPosition()) {
+            employee.updatePosition(position);
+            log(employee, "직책 " + position.getLabel() + "(으)로 변경");
+        }
         if (contractMin != null && contractMax != null) {
             if (contractMin < 0 || contractMax < contractMin || contractMax > 52) {
                 throw new IllegalArgumentException("계약 주 근무 시간 범위를 확인해주세요.");
@@ -262,7 +268,7 @@ public class EmployeeProfileService {
 
     private void log(Employee employee, String description) {
         changeLogRepository.save(new EmployeeChangeLog(employee, description));
-        fcmService.sendToDevice(employee.getUser().getDeviceToken(), "내 정보 변경", description);
+        fcmService.send(employee.getUser(), "내 정보 변경", description);
     }
 
     private static String label(SkillLevel level) {

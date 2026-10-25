@@ -101,6 +101,7 @@ def solve_schedule(config: dict, max_alt_solutions: int = 3) -> dict:
           "open_shifts": [0], "close_shifts": [2],  # (6차 추가) no_open_after_close 판단용 교대 인덱스
           "max_shifts_per_day": 1,            # (6차 추가) 하루 최대 교대 수 (쪼개기 근무면 2)
           "conflicting_shifts": [[0, 1]],     # (6차 추가) 시간이 겹쳐 같은 날 함께 할 수 없는 교대 쌍
+          "consecutive_days_limit": 5,        # (7차 추가, 하드) 매장 연속 근무 한도. 없으면 4 (연속 5일 이상 금지)
           skill_requirements 항목에 추가 가능 (7차 추가):
             {"shifts": [0, 1], "skill": "응대@HIGH", "count": 1,   # 여러 교대 중 어디에든 있으면 충족 (예: 피크 12-14시를 덮는 오픈·미들)
              "days": [1, 4],                                       # 이 날짜에만 적용
@@ -239,12 +240,14 @@ def solve_schedule(config: dict, max_alt_solutions: int = 3) -> dict:
             model.Add(weekly_hours <= weekly_cap)
 
     # ── [하드 4] 연속 5일 이상 근무 금지 ─────────
+    # (7차 수정) 매장이 consecutive_days_limit을 정하면 그 일수까지 연속 근무 허용. 없으면 기존처럼 4일
+    max_run = config.get("consecutive_days_limit", 4)
     for e in range(E):
-        for d in range(D - 4):
+        for d in range(D - max_run):
             model.Add(
                 sum(work[e, d + k, s]
-                    for k in range(5)
-                    for s in range(S)) <= 4
+                    for k in range(max_run + 1)
+                    for s in range(S)) <= max_run
             )
 
     # ── [하드 5] 교대별 최대 인원 (5차 추가, 선택) ──
