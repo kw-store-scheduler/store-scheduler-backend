@@ -29,6 +29,15 @@ class ApiAccessConfigTest {
     }
 
     @Test
+    void 서버_주소와_swagger_ui_html로_접속하면_API_문서로_이동한다() throws Exception {
+        mockMvc.perform(get("/"))
+                .andExpect(status().is3xxRedirection())
+                .andExpect(header().string("Location", containsString("/swagger-ui/index.html")));
+        mockMvc.perform(get("/swagger-ui.html"))
+                .andExpect(status().is3xxRedirection());
+    }
+
+    @Test
     void 허용된_출처의_preflight는_PATCH까지_통과한다() throws Exception {
         mockMvc.perform(options("/api/users/me/device-token")
                         .header("Origin", "http://localhost:5173")
