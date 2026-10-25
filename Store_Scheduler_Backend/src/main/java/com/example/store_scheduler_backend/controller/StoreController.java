@@ -4,8 +4,8 @@ import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.service.StoreService;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -41,14 +41,15 @@ public class StoreController {
         return ResponseEntity.ok(new StoreCreateResponse(storeId, newCode));
     }
 
-    // 관리자: 근무표 생성 규칙 설정 (guaranteeMustDayOff: 대신할 사람이 없어도 필수 휴무 보장)
+    // 관리자: 매장 설정 (guaranteeMustDayOff: 대신할 사람이 없어도 필수 휴무 보장, customersPerStaff: 인력 제안용 1인당 객수). 보낸 항목만 변경
     @PatchMapping("/{storeId}/settings")
     public ResponseEntity<StoreResponse> updateSettings(
             @PathVariable Long storeId,
             @Valid @RequestBody StoreSettingsRequest request,
             @AuthenticationPrincipal UserDetails userDetails) {
         return ResponseEntity.ok(StoreResponse.from(
-                storeService.updateSettings(storeId, request.getGuaranteeMustDayOff(), userDetails.getUsername())));
+                storeService.updateSettings(storeId, request.getGuaranteeMustDayOff(), request.getCustomersPerStaff(),
+                        userDetails.getUsername())));
     }
 
     // 관리자: 본인이 소유한 매장 목록 조회
@@ -69,8 +70,9 @@ public class StoreController {
 
     @Data
     static class StoreSettingsRequest {
-        @NotNull(message = "guaranteeMustDayOff 값을 입력해주세요.")
         private Boolean guaranteeMustDayOff;
+        @Min(value = 1, message = "1인당 객수는 1 이상이어야 합니다.")
+        private Integer customersPerStaff;
     }
 
     @Data
@@ -88,10 +90,11 @@ public class StoreController {
         private String address;
         private String storeCode;
         private boolean guaranteeMustDayOff;
+        private int customersPerStaff;
 
         static StoreResponse from(Store store) {
             return new StoreResponse(store.getId(), store.getName(), store.getAddress(), store.getStoreCode(),
-                    store.isMustDayOffGuaranteed());
+                    store.isMustDayOffGuaranteed(), store.getCustomersPerStaffOrDefault());
         }
     }
 }

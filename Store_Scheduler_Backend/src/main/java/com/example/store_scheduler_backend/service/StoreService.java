@@ -56,9 +56,9 @@ public class StoreService {
     }
 
     @Transactional
-    public Store updateSettings(Long storeId, boolean guaranteeMustDayOff, String managerUsername) {
+    public Store updateSettings(Long storeId, Boolean guaranteeMustDayOff, Integer customersPerStaff, String managerUsername) {
         Store store = storeAccessGuard.verifyOwner(storeId, managerUsername);
-        store.updateSettings(guaranteeMustDayOff);
+        store.updateSettings(guaranteeMustDayOff, customersPerStaff);
         return store;
     }
 }
