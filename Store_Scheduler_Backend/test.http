@@ -85,6 +85,13 @@ Content-Type: application/json
 GET {{host}}/api/stores
 Authorization: Bearer {{managerToken}}
 
+### 매장 설정 (관리자). guaranteeMustDayOff: 대신할 사람이 없어도 필수 휴무일에는 배정하지 않음
+PATCH {{host}}/api/stores/{{storeId}}/settings
+Authorization: Bearer {{managerToken}}
+Content-Type: application/json
+
+{ "guaranteeMustDayOff": false }
+
 ### 매장 코드로 합류 신청 (직원) → 승인 대기
 POST {{host}}/api/stores/join/{{storeCode}}
 Authorization: Bearer {{staff1Token}}

@@ -43,6 +43,7 @@ import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.empty;
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -251,6 +252,37 @@ class ScheduleGenerationTest {
         String second = automate(WEEK_START).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         assertThat(reasonsOf(second, midweekStaff, WEEK_START.plusDays(3), LocalTime.of(9, 0)))
                 .startsWith("기존 근무표 유지", "필요 스킬 보유: 일본어");
+    }
+
+    @Test
+    void 필수_휴무_보장을_켜면_대신할_사람이_없어도_배정하지_않고_인원_부족으로_보고한다() throws Exception {
+        dayOffRequestRepository.save(new DayOffRequest(weekdayStaff, WEEK_START.plusDays(1), DayOffType.MUST, "병원"));
+        mockMvc.perform(patch("/api/stores/{storeId}/settings", store.getId())
+                        .header("Authorization", "Bearer " + jwtTokenProvider.createToken("owner", "MANAGER"))
+                        .contentType("application/json").content("{\"guaranteeMustDayOff\":true}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.guaranteeMustDayOff").value(true));
+
+        String body = automate(WEEK_START).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+
+        var result = objectMapper.readTree(body);
+        assertThat(result.get("candidates").get(0).get("dayOffViolations").size()).isZero();
+        var tuesdayShortages = new java.util.ArrayList<String>();
+        result.get("shortages").forEach(s -> {
+            if (s.get("date").asText().equals(WEEK_START.plusDays(1).toString())) {
+                tuesdayShortages.add(s.get("shiftName").asText());
+            }
+        });
+        assertThat(tuesdayShortages).contains("오픈", "마감");
+    }
+
+    @Test
+    void 다른_매장_관리자는_매장_설정을_바꿀_수_없다() throws Exception {
+        userRepository.save(new User("otherOwner", "pw", Role.MANAGER));
+        mockMvc.perform(patch("/api/stores/{storeId}/settings", store.getId())
+                        .header("Authorization", "Bearer " + jwtTokenProvider.createToken("otherOwner", "MANAGER"))
+                        .contentType("application/json").content("{\"guaranteeMustDayOff\":true}"))
+                .andExpect(status().isForbidden());
     }
 
     @Test

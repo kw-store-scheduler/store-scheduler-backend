@@ -97,7 +97,7 @@ public class ScheduleAutomationService {
                         a -> a.getEmployee().getId(),
                         Collectors.toMap(this::toDayIndex, Function.identity())));
         Map<String, Object> config = buildEngineConfig(employees, shifts, skillRequirements, availabilityByEmployee);
-        addOffRequests(config, dayOffs, weekStart);
+        addOffRequests(config, dayOffs, weekStart, shifts.size(), store.isMustDayOffGuaranteed());
         config.put("prev_assignments", toPrevAssignments(current, weekStart, employees, shifts));
         Map<String, Object> result = pythonEngineRunner.run(config);
         String status = (String) result.get("status");
@@ -166,8 +166,10 @@ public class ScheduleAutomationService {
         return config;
     }
 
+    // 필수 휴무 보장이 켜져 있으면 그날의 모든 교대를 근무 불가(하드 제약)로도 넘긴다
     @SuppressWarnings("unchecked")
-    private void addOffRequests(Map<String, Object> config, List<DayOffRequest> dayOffs, LocalDate weekStart) {
+    private void addOffRequests(Map<String, Object> config, List<DayOffRequest> dayOffs, LocalDate weekStart,
+                                int shiftCount, boolean guaranteeMustDayOff) {
         Map<Long, List<Map<String, Object>>> byEmployee = dayOffs.stream()
                 .collect(Collectors.groupingBy(r -> r.getEmployee().getId(), Collectors.mapping(
                         r -> Map.<String, Object>of(
@@ -176,7 +178,19 @@ public class ScheduleAutomationService {
                         Collectors.toList())));
         for (Map<String, Object> employee : (List<Map<String, Object>>) config.get("employees")) {
             Long id = Long.valueOf(((String) employee.get("id")).substring(EMPLOYEE_KEY_PREFIX.length()));
-            employee.put("off_requests", byEmployee.getOrDefault(id, List.of()));
+            List<Map<String, Object>> offRequests = byEmployee.getOrDefault(id, List.of());
+            employee.put("off_requests", offRequests);
+            if (guaranteeMustDayOff) {
+                List<Map<String, Integer>> slots = new ArrayList<>((List<Map<String, Integer>>) employee.get("unavailable_slots"));
+                offRequests.stream()
+                        .filter(r -> "must".equals(r.get("type")))
+                        .forEach(r -> {
+                            for (int s = 0; s < shiftCount; s++) {
+                                slots.add(Map.of("day", (Integer) r.get("day"), "shift", s));
+                            }
+                        });
+                employee.put("unavailable_slots", slots);
+            }
         }
     }
 

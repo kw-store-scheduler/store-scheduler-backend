@@ -54,4 +54,11 @@ public class StoreService {
         store.reissueCode(newCode);
         return newCode;
     }
+
+    @Transactional
+    public Store updateSettings(Long storeId, boolean guaranteeMustDayOff, String managerUsername) {
+        Store store = storeAccessGuard.verifyOwner(storeId, managerUsername);
+        store.updateSettings(guaranteeMustDayOff);
+        return store;
+    }
 }
