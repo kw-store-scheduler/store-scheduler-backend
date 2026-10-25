@@ -1,9 +1,13 @@
 package com.example.store_scheduler_backend.service;
 
 import com.example.store_scheduler_backend.domain.Employee;
+import com.example.store_scheduler_backend.domain.OpenShift;
 import com.example.store_scheduler_backend.domain.Skill;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
+import com.example.store_scheduler_backend.repository.EmployeeSkillLevelRepository;
+import com.example.store_scheduler_backend.repository.OpenShiftRepository;
+import com.example.store_scheduler_backend.repository.SkillWindowRequirementRepository;
 import com.example.store_scheduler_backend.repository.ShiftSkillRequirementRepository;
 import com.example.store_scheduler_backend.repository.SkillRepository;
 import lombok.RequiredArgsConstructor;
@@ -20,6 +24,9 @@ public class SkillService {
     private final EmployeeRepository employeeRepository;
     private final StoreAccessGuard storeAccessGuard;
     private final ShiftSkillRequirementRepository requirementRepository;
+    private final EmployeeSkillLevelRepository levelRepository;
+    private final SkillWindowRequirementRepository windowRepository;
+    private final OpenShiftRepository openShiftRepository;
 
     @Transactional
     public Skill createSkill(Long storeId, String name, String managerUsername) {
@@ -47,6 +54,9 @@ public class SkillService {
         // 직원 보유 스킬·교대 필요 스킬로 참조 중이면 외래키 때문에 삭제되지 않으므로 먼저 정리
         employeeRepository.findBySkills_Id(skillId).forEach(e -> e.removeSkill(skill));
         requirementRepository.deleteAll(requirementRepository.findBySkillId(skillId));
+        levelRepository.deleteAll(levelRepository.findBySkillId(skillId));
+        windowRepository.deleteAll(windowRepository.findBySkillId(skillId));
+        openShiftRepository.findByRequiredSkillId(skillId).forEach(OpenShift::clearRequiredSkill);
         skillRepository.delete(skill);
     }
 

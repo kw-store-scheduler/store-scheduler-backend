@@ -5,7 +5,10 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 @Entity
@@ -31,6 +34,12 @@ public class Employee {
     private Boolean minor;
 
     private LocalDateTime requestedAt;
+
+    // 이 날짜까지 수습. 수습 중에는 수습이 아닌 직원과 같은 교대에만 배치된다
+    private LocalDate probationUntil;
+
+    // EmployeePermission 이름을 쉼표로 이어 저장
+    private String permissions;
 
     // 약속 점수. 개인 사정으로 빠지고 대타를 못 구하면 -1, 매달 절반씩 회복. 휴무가 겹칠 때 순서를 정하는 데만 쓴다
     private Integer promiseScore;
@@ -81,6 +90,26 @@ public class Employee {
 
     public boolean isMinor() {
         return Boolean.TRUE.equals(minor);
+    }
+
+    public boolean isOnProbation(LocalDate date) {
+        return probationUntil != null && !date.isAfter(probationUntil);
+    }
+
+    public void updateProbation(LocalDate probationUntil) {
+        this.probationUntil = probationUntil;
+    }
+
+    public List<EmployeePermission> getPermissionList() {
+        if (permissions == null || permissions.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(permissions.split(",")).map(EmployeePermission::valueOf).toList();
+    }
+
+    public void updatePermissions(Collection<EmployeePermission> permissions) {
+        this.permissions = permissions.isEmpty() ? null
+                : String.join(",", permissions.stream().distinct().sorted().map(Enum::name).toList());
     }
 
     public int getPromiseScore() {

@@ -60,6 +60,8 @@ public class SecurityConfig {
                                 "/api/stores/*/preference-report/my").hasRole("EMPLOYEE")
                         .requestMatchers("/api/stores/*/preferences").hasRole("MANAGER")
                         .requestMatchers("/api/stores/*/tasks/my").hasRole("EMPLOYEE")
+                        .requestMatchers("/api/stores/*/my-skills").hasRole("EMPLOYEE")
+                        .requestMatchers("/api/stores/*/skill-requests", "/api/stores/*/skill-matrix").hasRole("MANAGER")
                         .requestMatchers("/api/stores/*/leaves/my").hasRole("EMPLOYEE")
                         .requestMatchers(HttpMethod.GET, "/api/stores/*/leaves").hasRole("MANAGER")
                         .requestMatchers(HttpMethod.POST, "/api/stores/*/leaves").hasRole("EMPLOYEE")

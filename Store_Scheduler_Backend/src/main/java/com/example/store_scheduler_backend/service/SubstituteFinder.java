@@ -140,6 +140,15 @@ public class SubstituteFinder {
                     ? Optional.of("필수 휴무 신청일")
                     : findBlocker(employee, availabilityByEmployee.get(employee.getId()), preferences, own, date, start, end,
                     weeklyHours + shiftHours);
+            // 수습 중이면 같은 교대에 수습이 아닌 직원이 있어야 한다
+            if (blocker.isEmpty() && employee.isOnProbation(date) && slotsByEmployee.values().stream()
+                    .flatMap(List::stream)
+                    .filter(s -> s.date().equals(date) && s.start().equals(start) && s.end().equals(end))
+                    .map(WorkSlot::employee)
+                    .filter(e -> !e.getId().equals(excludeEmployeeId) && !e.getId().equals(employee.getId()))
+                    .noneMatch(e -> !e.isOnProbation(date))) {
+                blocker = Optional.of("수습 기간: 같은 교대에 선임이 없음");
+            }
             boolean onPreferredDayOff = dayOff == DayOffType.PREFER;
             List<String> coveredSkills = employee.getSkills().stream()
                     .filter(skill -> missingSkillIds.contains(skill.getId()))
