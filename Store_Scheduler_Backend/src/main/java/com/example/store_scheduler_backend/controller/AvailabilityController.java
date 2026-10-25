@@ -2,6 +2,7 @@ package com.example.store_scheduler_backend.controller;
 
 import com.example.store_scheduler_backend.domain.Availability;
 import com.example.store_scheduler_backend.service.AvailabilityService;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotNull;
 import lombok.AllArgsConstructor;
@@ -18,6 +19,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 @RestController
+@Tag(name = "가용 시간 API", description = "직원 요일별 근무 가능 시간")
 @RequiredArgsConstructor
 public class AvailabilityController {
 

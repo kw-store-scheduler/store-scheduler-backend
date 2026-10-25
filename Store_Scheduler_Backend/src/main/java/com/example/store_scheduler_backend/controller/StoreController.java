@@ -2,6 +2,7 @@ package com.example.store_scheduler_backend.controller;
 
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.service.StoreService;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import lombok.AllArgsConstructor;
@@ -16,6 +17,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 @RestController
+@Tag(name = "매장 API", description = "매장 등록·조회 및 매장 코드 발급")
 @RequestMapping("/api/stores")
 @RequiredArgsConstructor
 public class StoreController {

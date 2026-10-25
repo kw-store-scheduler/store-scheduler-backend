@@ -2,6 +2,7 @@ package com.example.store_scheduler_backend.controller;
 
 import com.example.store_scheduler_backend.domain.Skill;
 import com.example.store_scheduler_backend.service.SkillService;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import lombok.AllArgsConstructor;
@@ -16,6 +17,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 @RestController
+@Tag(name = "스킬 API", description = "매장 스킬 관리 및 직원 스킬 부여")
 @RequiredArgsConstructor
 public class SkillController {
 

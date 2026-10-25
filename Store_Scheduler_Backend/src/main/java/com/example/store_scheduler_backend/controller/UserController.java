@@ -1,6 +1,7 @@
 package com.example.store_scheduler_backend.controller;
 
 import com.example.store_scheduler_backend.service.AuthService;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import lombok.Data;
@@ -11,6 +12,7 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 
 @RestController
+@Tag(name = "사용자 API", description = "푸시 알림 기기 토큰 등록")
 @RequestMapping("/api/users")
 @RequiredArgsConstructor
 public class UserController {
