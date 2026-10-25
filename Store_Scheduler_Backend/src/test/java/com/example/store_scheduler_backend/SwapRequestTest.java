@@ -6,6 +6,9 @@ import com.example.store_scheduler_backend.domain.DayOffType;
 import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.Role;
 import com.example.store_scheduler_backend.domain.Schedule;
+import com.example.store_scheduler_backend.domain.Shift;
+import com.example.store_scheduler_backend.domain.ShiftSkillRequirement;
+import com.example.store_scheduler_backend.domain.Skill;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.domain.SwapStatus;
 import com.example.store_scheduler_backend.domain.User;
@@ -13,6 +16,9 @@ import com.example.store_scheduler_backend.repository.AvailabilityRepository;
 import com.example.store_scheduler_backend.repository.DayOffRequestRepository;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
 import com.example.store_scheduler_backend.repository.ScheduleRepository;
+import com.example.store_scheduler_backend.repository.ShiftRepository;
+import com.example.store_scheduler_backend.repository.ShiftSkillRequirementRepository;
+import com.example.store_scheduler_backend.repository.SkillRepository;
 import com.example.store_scheduler_backend.repository.StoreRepository;
 import com.example.store_scheduler_backend.repository.SwapRequestRepository;
 import com.example.store_scheduler_backend.repository.UserRepository;
@@ -61,6 +67,9 @@ class SwapRequestTest {
     @Autowired ScheduleRepository scheduleRepository;
     @Autowired SwapRequestRepository swapRequestRepository;
     @Autowired DayOffRequestRepository dayOffRequestRepository;
+    @Autowired SkillRepository skillRepository;
+    @Autowired ShiftRepository shiftRepository;
+    @Autowired ShiftSkillRequirementRepository requirementRepository;
 
     private Store store;
     private Employee requester;
@@ -127,6 +136,40 @@ class SwapRequestTest {
         assertThat(first.get("eligible").asBoolean()).isTrue();
         assertThat(first.get("reasons").get(0).asText()).isEqualTo("희망 휴무 신청일");
         offer(requestId, busy).andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void 결원으로_필요_스킬이_모자라면_보유자를_먼저_추천한다() throws Exception {
+        Skill japanese = requireSkillOnOpenShift("일본어");
+        requester.addSkill(japanese);
+        busy.addSkill(japanese);
+        long requestId = requestSwap();
+
+        JsonNode candidates = read(as("owner", Role.MANAGER, get(candidatesUrl(requestId))).andExpect(status().isOk()));
+
+        JsonNode first = candidates.get(0);
+        assertThat(first.get("name").asText()).isEqualTo("바쁨");
+        assertThat(first.get("coveredSkills").get(0).asText()).isEqualTo("일본어");
+        assertThat(first.get("reasons").get(0).asText()).isEqualTo("필요 스킬 보유: 일본어");
+        assertThat(candidates.get(1).get("name").asText()).isEqualTo("여유");
+        assertThat(candidates.get(1).get("coveredSkills").size()).isZero();
+    }
+
+    @Test
+    void 같은_근무의_다른_직원이_스킬을_채우고_있으면_순서를_바꾸지_않는다() throws Exception {
+        Skill japanese = requireSkillOnOpenShift("일본어");
+        requester.addSkill(japanese);
+        busy.addSkill(japanese);
+        Employee coworker = employee("동료", 10030);
+        coworker.addSkill(japanese);
+        schedule(coworker, TARGET, 9, 13);
+        long requestId = requestSwap();
+
+        JsonNode candidates = read(as("owner", Role.MANAGER, get(candidatesUrl(requestId))).andExpect(status().isOk()));
+
+        assertThat(candidates.get(0).get("name").asText()).isEqualTo("여유");
+        assertThat(candidates.get(1).get("name").asText()).isEqualTo("바쁨");
+        assertThat(candidates.get(1).get("coveredSkills").size()).isZero();
     }
 
     @Test
@@ -237,6 +280,19 @@ class SwapRequestTest {
 
     private String actionUrl(long requestId, String action) {
         return "/api/stores/" + store.getId() + "/swap-requests/" + requestId + "/" + action;
+    }
+
+    // 오픈(09~13) 교대에 해당 스킬 보유자 1명 필요
+    private Skill requireSkillOnOpenShift(String skillName) {
+        Skill skill = skillRepository.save(new Skill(skillName, store));
+        Shift open = new Shift();
+        open.setName("오픈");
+        open.setStartTime(LocalTime.of(9, 0));
+        open.setEndTime(LocalTime.of(13, 0));
+        open.setRequiredStaff(1);
+        open.setStore(store);
+        requirementRepository.save(new ShiftSkillRequirement(shiftRepository.save(open), skill, 1));
+        return skill;
     }
 
     private Employee employee(String name, int wage) {
