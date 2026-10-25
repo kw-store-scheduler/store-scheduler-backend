@@ -218,6 +218,7 @@ docker compose up -d     # PostgreSQL 16 (scheduler_db / scheduler / scheduler)
 ```bash
 ./gradlew test           # H2 사용, Docker 불필요. python3 + ortools가 있으면 실제 엔진 테스트도 실행
 ```
+PR과 main push마다 GitHub Actions(`.github/workflows/test.yml`)에서 OR-Tools를 설치하고 같은 테스트를 실행한다.
 
 ### 환경 변수 (local 프로파일 외 실행 시)
 | 변수 | 설명 | 기본값 |
