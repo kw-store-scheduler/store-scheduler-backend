@@ -232,6 +232,7 @@ PR과 main push마다 GitHub Actions(`.github/workflows/test.yml`)에서 OR-Tool
 | `JWT_EXPIRATION_TIME` | 토큰 만료(ms) | 3600000 |
 | `PYTHON_COMMAND` | Python 실행 명령 (가상환경 경로 등) | python3 |
 | `ENGINE_TIMEOUT_SECONDS` | 엔진 응답 대기 한도 | 60 |
+| `CORS_ALLOWED_ORIGINS` | 추가로 허용할 웹 프론트 출처(쉼표 구분). localhost는 포트와 관계없이 항상 허용 | 없음 |
 
 FCM 서비스 계정 키(`firebase-service-account.json`)가 클래스패스에 없으면 푸시 알림만 비활성화되고 나머지 기능은 정상 동작한다.
 

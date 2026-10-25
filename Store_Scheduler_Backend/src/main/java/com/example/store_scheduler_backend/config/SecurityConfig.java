@@ -14,6 +14,9 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
+import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
+
 @Configuration
 @EnableWebSecurity
 @RequiredArgsConstructor
@@ -50,8 +53,20 @@ public class SecurityConfig {
                         .requestMatchers("/api/stores/*/schedules").authenticated()
                         .anyRequest().authenticated()
                 )
+                // 앱이 "다시 로그인"(401)과 "권한 없음"(403)을 구분할 수 있게 둘 다 JSON 메시지로 응답
+                .exceptionHandling(e -> e
+                        .authenticationEntryPoint((request, response, ex) ->
+                                writeError(response, HttpServletResponse.SC_UNAUTHORIZED, "로그인이 필요합니다. 토큰이 없거나 만료되었습니다."))
+                        .accessDeniedHandler((request, response, ex) ->
+                                writeError(response, HttpServletResponse.SC_FORBIDDEN, "접근 권한이 없습니다.")))
                 .addFilterBefore(jwtAuthenticationFilter, UsernamePasswordAuthenticationFilter.class);
 
         return http.build();
+    }
+
+    private static void writeError(HttpServletResponse response, int status, String message) throws IOException {
+        response.setStatus(status);
+        response.setContentType("application/json;charset=UTF-8");
+        response.getWriter().write("{\"message\":\"" + message + "\"}");
     }
 }

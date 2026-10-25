@@ -23,6 +23,10 @@ logging:
   level:
     org.hibernate.SQL: debug
 
+cors:
+  # 추가로 허용할 웹 프론트 출처 (쉼표 구분, 예: https://app.example.com). localhost는 항상 허용
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:}
+
 server:
   # 배포 플랫폼(Render 등)이 PORT 환경변수로 포트를 지정한다
   port: ${PORT:8080}
