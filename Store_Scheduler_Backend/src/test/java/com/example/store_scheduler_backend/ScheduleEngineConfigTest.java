@@ -40,6 +40,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -131,6 +132,42 @@ class ScheduleEngineConfigTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
+    void 기준별로_가중치를_바꿔_세_번_풀고_직원별_시급을_넘긴다() {
+        automationService.generateProposal(store.getId(), WEEK_START, "owner");
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(pythonEngineRunner, times(3)).run(captor.capture());
+
+        List<Map<String, Object>> configs = captor.getAllValues();
+        assertThat(configs).extracting(c -> c.get("weight_overrides")).containsExactly(
+                Map.of(),
+                Map.of("FAIRNESS_W", 0, "LOW_HOURS_W", 0, "CHANGE_W", 0),
+                Map.of("FAIRNESS_W", 1_000_000));
+        assertThat(configs).extracting(c -> c.get("max_alt_solutions")).containsExactly(1, 1, 1);
+        assertThat(configs.get(0).get("max_staff")).isEqualTo(configs.get(0).get("target_staff"));
+        Map<String, Object> employeeConfig = (Map<String, Object>) ((List<?>) configs.get(0).get("employees")).get(0);
+        assertThat(employeeConfig.get("hourly")).isEqualTo(10030);
+    }
+
+    @Test
+    void 기준별_결과가_다르면_각각_후보안이_되고_같으면_라벨을_합친다() {
+        Employee senior = new Employee("시니어", null, store, userRepository.save(new User("senior", "pw", Role.EMPLOYEE)));
+        senior.approve(12000);
+        employeeRepository.save(senior);
+        Map<String, Object> balanced = Map.of("status", "OPTIMAL", "solve_ms", 1, "shortage_report", List.of(),
+                "schedule", List.of(assigned(employee, MON, OPEN), assigned(senior)));
+        Map<String, Object> fairness = Map.of("status", "OPTIMAL", "solve_ms", 1,
+                "schedule", List.of(assigned(employee), assigned(senior, MON, OPEN)));
+        when(pythonEngineRunner.run(any())).thenReturn(balanced, balanced, fairness);
+
+        List<Candidate> candidates = automationService.generateProposal(store.getId(), WEEK_START, "owner").getCandidates();
+
+        assertThat(candidates).extracting(Candidate::label).containsExactly("균형 해 · 최소 비용 해", "최고 공평 해");
+        assertThat(candidates).extracting(Candidate::index).containsExactly(0, 1);
+        assertThat(candidates).extracting(Candidate::estimatedCost).containsExactly(4L * 10030, 4L * 12000);
+    }
+
+    @Test
     void 요일_전용_교대는_해당_요일이_아니면_인원_부족으로_보고하지_않는다() {
         ScheduleProposalResponse response = automationService.generateProposal(store.getId(), WEEK_START, "owner");
 
@@ -140,7 +177,7 @@ class ScheduleEngineConfigTest {
     }
 
     @Test
-    void 대안_해가_있으면_후보안마다_직원별_시급으로_비용과_변경_칸_수를_계산한다() {
+    void 후보안마다_직원별_시급으로_비용과_변경_칸_수를_계산하고_동점_대안은_쓰지_않는다() {
         Employee senior = new Employee("시니어", null, store, userRepository.save(new User("senior", "pw", Role.EMPLOYEE)));
         senior.approve(12000);
         employeeRepository.save(senior);
@@ -152,13 +189,13 @@ class ScheduleEngineConfigTest {
         existing.setEndTime(LocalTime.of(13, 0));
         scheduleRepository.save(existing);
 
-        // 0번: 기존과 같이 오전형이 월 오픈 / 1번: 시니어가 월 오픈, 2번: 시니어가 토 마감(야간)
-        when(pythonEngineRunner.run(any())).thenReturn(Map.of(
-                "status", "OPTIMAL", "cost", 0, "solve_ms", 1, "shortage_report", List.of(),
-                "schedule", List.of(assigned(employee, MON, OPEN), assigned(senior)),
-                "alt_schedules", List.of(
-                        List.of(assigned(employee), assigned(senior, MON, OPEN)),
-                        List.of(assigned(employee), assigned(senior, SAT, CLOSE)))));
+        // 균형: 기존과 같이 오전형이 월 오픈 / 최소 비용: 시니어가 월 오픈 / 최고 공평: 시니어가 토 마감(야간)
+        when(pythonEngineRunner.run(any())).thenReturn(
+                Map.of("status", "OPTIMAL", "cost", 0, "solve_ms", 1, "shortage_report", List.of(),
+                        "schedule", List.of(assigned(employee, MON, OPEN), assigned(senior)),
+                        "alt_schedules", List.of(List.of(assigned(employee), assigned(senior, SAT, OPEN)))),
+                Map.of("status", "OPTIMAL", "solve_ms", 1, "schedule", List.of(assigned(employee), assigned(senior, MON, OPEN))),
+                Map.of("status", "OPTIMAL", "solve_ms", 1, "schedule", List.of(assigned(employee), assigned(senior, SAT, CLOSE))));
 
         List<Candidate> candidates = automationService.generateProposal(store.getId(), WEEK_START, "owner").getCandidates();
 
@@ -190,8 +227,8 @@ class ScheduleEngineConfigTest {
         ScheduleProposalResponse response = automationService.generateProposal(store.getId(), WEEK_START, "owner");
 
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
-        verify(pythonEngineRunner).run(captor.capture());
-        Map<String, Object> config = captor.getValue();
+        verify(pythonEngineRunner, times(3)).run(captor.capture());
+        Map<String, Object> config = captor.getAllValues().get(0);
         assertThat((List<String>) ((Map<String, Object>) ((List<?>) config.get("employees")).get(0)).get("skills"))
                 .containsExactly(skillKey);
         assertThat((List<Map<String, Object>>) config.get("skill_requirements"))
@@ -218,8 +255,8 @@ class ScheduleEngineConfigTest {
         ScheduleProposalResponse response = automationService.generateProposal(store.getId(), WEEK_START, "owner");
 
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
-        verify(pythonEngineRunner).run(captor.capture());
-        Map<String, Object> employeeConfig = (Map<String, Object>) ((List<?>) captor.getValue().get("employees")).get(0);
+        verify(pythonEngineRunner, times(3)).run(captor.capture());
+        Map<String, Object> employeeConfig = (Map<String, Object>) ((List<?>) captor.getAllValues().get(0).get("employees")).get(0);
         assertThat((List<Map<String, Object>>) employeeConfig.get("off_requests")).containsExactlyInAnyOrder(
                 Map.of("day", MON, "type", "must"),
                 Map.of("day", SAT, "type", "prefer"));
@@ -241,8 +278,9 @@ class ScheduleEngineConfigTest {
     private Map<String, Object> generateAndCaptureConfig() {
         automationService.generateProposal(store.getId(), WEEK_START, "owner");
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
-        verify(pythonEngineRunner).run(captor.capture());
-        return captor.getValue();
+        // 균형 해 → 최소 비용 해 → 최고 공평 해 순서로 호출된다. 입력 구성 검증은 첫 호출 기준
+        verify(pythonEngineRunner, times(3)).run(captor.capture());
+        return captor.getAllValues().get(0);
     }
 
     private Map<String, Integer> slot(int day, int shift) {

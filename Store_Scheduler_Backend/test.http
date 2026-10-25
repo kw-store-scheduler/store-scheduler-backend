@@ -256,7 +256,7 @@ Authorization: Bearer {{managerToken}}
 
 ### ─────────────── 5. 근무표 자동 생성 · 확정 (관리자) ───────────────
 
-### 주간 근무표 후보안 생성 (weekStart는 월요일). 이 단계에서는 근무표가 바뀌지 않는다
+### 주간 근무표 후보안 생성 (weekStart는 월요일). 균형 해 / 최소 비용 해 / 최고 공평 해 3안. 이 단계에서는 근무표가 바뀌지 않는다
 POST {{host}}/api/stores/{{storeId}}/schedules/automate?weekStart={{weekStart}}
 Authorization: Bearer {{managerToken}}
 

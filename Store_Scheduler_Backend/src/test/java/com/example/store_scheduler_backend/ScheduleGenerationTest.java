@@ -30,6 +30,7 @@ import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 
 import java.time.DayOfWeek;
@@ -286,6 +287,27 @@ class ScheduleGenerationTest {
     }
 
     @Test
+    void 최고_공평_해는_근무일을_고르게_나누고_최소_비용_해는_더_저렴하다() throws Exception {
+        // 매일 오픈 1명, 시급만 다른 두 직원. 연속 5일 금지라 한 명이 최대 6일까지 가능
+        store = storeRepository.save(new Store("시급차이매장", null, store.getOwner(), "GENCODE2"));
+        Employee cheap = approvedEmployee("저시급", 10030);
+        Employee expensive = approvedEmployee("고시급", 15000);
+        available(cheap, DayOfWeek.values());
+        available(expensive, DayOfWeek.values());
+        shift("오픈", LocalTime.of(9, 0), LocalTime.of(13, 0));
+
+        String body = automate(WEEK_START).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+
+        var candidates = objectMapper.readTree(body).get("candidates");
+        var fairness = candidateLabeled(candidates, "최고 공평 해");
+        var cost = candidateLabeled(candidates, "최소 비용 해");
+        var fairDays = new java.util.ArrayList<Integer>();
+        fairness.get("employees").forEach(e -> fairDays.add(e.get("workDays").asInt()));
+        assertThat(fairDays).containsExactlyInAnyOrder(4, 3);
+        assertThat(cost.get("estimatedCost").asLong()).isLessThan(fairness.get("estimatedCost").asLong());
+    }
+
+    @Test
     void 시작일이_월요일이_아니면_거절한다() throws Exception {
         automate(WEEK_START.plusDays(1)).andExpect(status().isBadRequest());
     }
@@ -345,6 +367,15 @@ class ScheduleGenerationTest {
         return (int) scheduleRepository.findByStoreIdOrderByWorkDateAscStartTimeAsc(store.getId()).stream()
                 .filter(s -> !s.getWorkDate().isAfter(WEEK_START.plusDays(6)))
                 .count();
+    }
+
+    private JsonNode candidateLabeled(JsonNode candidates, String label) {
+        for (JsonNode c : candidates) {
+            if (List.of(c.get("label").asText().split(" · ")).contains(label)) {
+                return c;
+            }
+        }
+        throw new AssertionError("후보안 없음: " + label);
     }
 
     private List<String> reasonsOf(String body, Employee employee, LocalDate date, LocalTime start) throws Exception {
