@@ -149,11 +149,12 @@ public class SwapRequestController {
         private String name;
         private boolean eligible;
         private int weeklyHours;
+        private List<String> coveredSkills;
         private List<String> reasons;
 
         static CandidateResponse from(SubstituteFinder.Candidate c) {
             return new CandidateResponse(c.employee().getId(), c.employee().getName(),
-                    c.eligible(), c.weeklyHours(), c.reasons());
+                    c.eligible(), c.weeklyHours(), c.coveredSkills(), c.reasons());
         }
     }
 }
