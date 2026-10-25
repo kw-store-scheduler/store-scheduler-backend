@@ -141,9 +141,9 @@ class ScheduleEngineConfigTest {
         List<Map<String, Object>> configs = captor.getAllValues();
         assertThat(configs).extracting(c -> c.get("weight_overrides")).containsExactly(
                 Map.of(),
-                Map.of("FAIRNESS_W", 1_000_000),
-                Map.of("FAIRNESS_W", 0, "LOW_HOURS_W", 0, "CHANGE_W", 0));
-        assertThat(configs).extracting(c -> c.get("max_alt_solutions")).containsExactly(3, 1, 1);
+                Map.of("FAIRNESS_W", 0, "LOW_HOURS_W", 0, "CHANGE_W", 0),
+                Map.of("FAIRNESS_W", 1_000_000));
+        assertThat(configs).extracting(c -> c.get("max_alt_solutions")).containsExactly(1, 1, 1);
         assertThat(configs.get(0).get("max_staff")).isEqualTo(configs.get(0).get("target_staff"));
         Map<String, Object> employeeConfig = (Map<String, Object>) ((List<?>) configs.get(0).get("employees")).get(0);
         assertThat(employeeConfig.get("hourly")).isEqualTo(10030);
@@ -158,11 +158,11 @@ class ScheduleEngineConfigTest {
                 "schedule", List.of(assigned(employee, MON, OPEN), assigned(senior)));
         Map<String, Object> fairness = Map.of("status", "OPTIMAL", "solve_ms", 1,
                 "schedule", List.of(assigned(employee), assigned(senior, MON, OPEN)));
-        when(pythonEngineRunner.run(any())).thenReturn(balanced, fairness, balanced);
+        when(pythonEngineRunner.run(any())).thenReturn(balanced, balanced, fairness);
 
         List<Candidate> candidates = automationService.generateProposal(store.getId(), WEEK_START, "owner").getCandidates();
 
-        assertThat(candidates).extracting(Candidate::label).containsExactly("균형 · 인건비 우선", "공평성 우선");
+        assertThat(candidates).extracting(Candidate::label).containsExactly("균형 해 · 최소 비용 해", "최고 공평 해");
         assertThat(candidates).extracting(Candidate::index).containsExactly(0, 1);
         assertThat(candidates).extracting(Candidate::estimatedCost).containsExactly(4L * 10030, 4L * 12000);
     }
@@ -177,7 +177,7 @@ class ScheduleEngineConfigTest {
     }
 
     @Test
-    void 대안_해가_있으면_후보안마다_직원별_시급으로_비용과_변경_칸_수를_계산한다() {
+    void 후보안마다_직원별_시급으로_비용과_변경_칸_수를_계산하고_동점_대안은_쓰지_않는다() {
         Employee senior = new Employee("시니어", null, store, userRepository.save(new User("senior", "pw", Role.EMPLOYEE)));
         senior.approve(12000);
         employeeRepository.save(senior);
@@ -189,13 +189,13 @@ class ScheduleEngineConfigTest {
         existing.setEndTime(LocalTime.of(13, 0));
         scheduleRepository.save(existing);
 
-        // 0번: 기존과 같이 오전형이 월 오픈 / 1번: 시니어가 월 오픈, 2번: 시니어가 토 마감(야간)
-        when(pythonEngineRunner.run(any())).thenReturn(Map.of(
-                "status", "OPTIMAL", "cost", 0, "solve_ms", 1, "shortage_report", List.of(),
-                "schedule", List.of(assigned(employee, MON, OPEN), assigned(senior)),
-                "alt_schedules", List.of(
-                        List.of(assigned(employee), assigned(senior, MON, OPEN)),
-                        List.of(assigned(employee), assigned(senior, SAT, CLOSE)))));
+        // 균형: 기존과 같이 오전형이 월 오픈 / 최소 비용: 시니어가 월 오픈 / 최고 공평: 시니어가 토 마감(야간)
+        when(pythonEngineRunner.run(any())).thenReturn(
+                Map.of("status", "OPTIMAL", "cost", 0, "solve_ms", 1, "shortage_report", List.of(),
+                        "schedule", List.of(assigned(employee, MON, OPEN), assigned(senior)),
+                        "alt_schedules", List.of(List.of(assigned(employee), assigned(senior, SAT, OPEN)))),
+                Map.of("status", "OPTIMAL", "solve_ms", 1, "schedule", List.of(assigned(employee), assigned(senior, MON, OPEN))),
+                Map.of("status", "OPTIMAL", "solve_ms", 1, "schedule", List.of(assigned(employee), assigned(senior, SAT, CLOSE))));
 
         List<Candidate> candidates = automationService.generateProposal(store.getId(), WEEK_START, "owner").getCandidates();
 
@@ -278,7 +278,7 @@ class ScheduleEngineConfigTest {
     private Map<String, Object> generateAndCaptureConfig() {
         automationService.generateProposal(store.getId(), WEEK_START, "owner");
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
-        // 균형안 → 공평성 우선 → 인건비 우선 순서로 호출된다. 입력 구성 검증은 첫 호출 기준
+        // 균형 해 → 최소 비용 해 → 최고 공평 해 순서로 호출된다. 입력 구성 검증은 첫 호출 기준
         verify(pythonEngineRunner, times(3)).run(captor.capture());
         return captor.getAllValues().get(0);
     }

@@ -58,17 +58,16 @@ public class ScheduleAutomationService {
     private static final LocalTime NIGHT_END = LocalTime.of(6, 0);
     // 가용 시간은 자정을 넘겨 등록할 수 없어서, 23:59까지 가능하면 자정 넘김 교대도 가능한 것으로 본다
     private static final LocalTime END_OF_DAY = LocalTime.of(23, 59);
-    private static final int MAX_CANDIDATES = 3;
 
     // 같은 입력을 가중치만 바꿔 다시 풀어 성격이 다른 후보안을 만든다. 키는 엔진의 weight_overrides 이름
     private record Plan(String label, String description, Map<String, Object> weightOverrides) {
     }
 
     private static final List<Plan> PLANS = List.of(
-            new Plan("균형", "기본 우선순위로 인원·휴무·인건비·공평성을 함께 고려", Map.of()),
-            new Plan("공평성 우선", "인건비가 늘더라도 직원 간 근무일 차이를 줄임", Map.of("FAIRNESS_W", 1_000_000)),
-            new Plan("인건비 우선", "근무일 균등·주 15시간·기존 근무 유지보다 인건비 절감을 우선",
-                    Map.of("FAIRNESS_W", 0, "LOW_HOURS_W", 0, "CHANGE_W", 0)));
+            new Plan("균형 해", "기본 우선순위로 인원·휴무·인건비·공평성을 함께 고려", Map.of()),
+            new Plan("최소 비용 해", "근무일 균등·주 15시간·기존 근무 유지보다 인건비 절감을 우선",
+                    Map.of("FAIRNESS_W", 0, "LOW_HOURS_W", 0, "CHANGE_W", 0)),
+            new Plan("최고 공평 해", "인건비가 늘더라도 직원 간 근무일 차이를 최소화", Map.of("FAIRNESS_W", 1_000_000)));
 
     private record LabeledSolution(String label, String description, List<Map<String, Object>> solution) {
     }
@@ -114,8 +113,8 @@ public class ScheduleAutomationService {
         addOffRequests(config, dayOffs, weekStart, shifts.size(), store.isMustDayOffGuaranteed());
         config.put("prev_assignments", toPrevAssignments(current, weekStart, employees, shifts));
 
-        // 인원·스킬 부족과 상태는 균형안 기준. 균형안이 해를 못 찾으면 다른 기준으로도 찾을 수 없다
-        Map<String, Object> result = pythonEngineRunner.run(withPlan(config, PLANS.get(0), MAX_CANDIDATES));
+        // 인원·스킬 부족과 상태는 균형 해 기준. 균형 해가 없으면 다른 기준으로도 찾을 수 없다
+        Map<String, Object> result = pythonEngineRunner.run(withPlan(config, PLANS.get(0)));
         String status = (String) result.get("status");
         if (result.get("schedule") == null) {
             return ScheduleProposalResponse.failed(status, weekStart);
@@ -124,20 +123,12 @@ public class ScheduleAutomationService {
         List<LabeledSolution> solutions = new ArrayList<>();
         solutions.add(new LabeledSolution(PLANS.get(0).label(), PLANS.get(0).description(), toSolution(result.get("schedule"))));
         for (Plan plan : PLANS.subList(1, PLANS.size())) {
-            Map<String, Object> planResult = pythonEngineRunner.run(withPlan(config, plan, 1));
+            Map<String, Object> planResult = pythonEngineRunner.run(withPlan(config, plan));
             solveMs += solveMsOf(planResult);
             if (planResult.get("schedule") != null) {
                 solutions.add(new LabeledSolution(plan.label(), plan.description(), toSolution(planResult.get("schedule"))));
             }
         }
-        Object alternatives = result.get("alt_schedules");
-        if (alternatives != null) {
-            int n = 1;
-            for (Object alternative : (List<?>) alternatives) {
-                solutions.add(new LabeledSolution("균형 대안 " + n++, "균형안과 같은 점수의 다른 배치", toSolution(alternative)));
-            }
-        }
-
         AssignmentContext context = new AssignmentContext(employees, current, dayOffs, skillRequirements, availabilityByEmployee);
         List<Candidate> candidates = toCandidates(solutions, weekStart, shifts, context);
         List<Shortage> shortages = new ArrayList<>(toShortages(result.get("shortage_report"), weekStart, shifts));
@@ -151,10 +142,11 @@ public class ScheduleAutomationService {
                 weekStart, solveMs, proposal.getStatus(), null, shortages, candidates);
     }
 
-    private Map<String, Object> withPlan(Map<String, Object> config, Plan plan, int maxSolutions) {
+    // 기준마다 대표 해 하나만 쓰므로 동점 대안 탐색(max_alt_solutions)은 하지 않는다
+    private Map<String, Object> withPlan(Map<String, Object> config, Plan plan) {
         Map<String, Object> planConfig = new HashMap<>(config);
         planConfig.put("weight_overrides", plan.weightOverrides());
-        planConfig.put("max_alt_solutions", maxSolutions);
+        planConfig.put("max_alt_solutions", 1);
         return planConfig;
     }
 
@@ -291,7 +283,7 @@ public class ScheduleAutomationService {
                                      Map<Long, Map<Integer, Availability>> availabilityByEmployee) {
     }
 
-    // 기준별 해를 순서대로 후보안으로 만든다. 배치가 같은 해는 하나로 합치고 라벨만 이어 붙이며, 최대 3개까지
+    // 기준별 해를 순서대로 후보안으로 만든다. 배치가 같은 해는 하나로 합치고 라벨만 이어 붙인다
     private List<Candidate> toCandidates(List<LabeledSolution> solutions, LocalDate weekStart, List<Shift> shifts,
                                          AssignmentContext context) {
         List<Employee> employees = context.employees();
@@ -315,9 +307,6 @@ public class ScheduleAutomationService {
                 Candidate c = candidates.get(same);
                 candidates.set(same, new Candidate(c.index(), c.label() + " · " + solution.label(), c.description(),
                         c.estimatedCost(), c.changedFromCurrent(), c.employees(), c.assignments(), c.dayOffViolations()));
-                continue;
-            }
-            if (candidates.size() == MAX_CANDIDATES) {
                 continue;
             }
             slotsByCandidate.add(slots);
