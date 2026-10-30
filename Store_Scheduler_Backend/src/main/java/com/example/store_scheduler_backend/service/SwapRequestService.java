@@ -345,12 +345,15 @@ public class SwapRequestService {
         requests.forEach(SwapRequest::detachSchedule);
     }
 
-    // 퇴사하는 직원에게 걸린 대타 요청을 정리한다. 승인 대기 중인 대타였으면 다시 대타를 찾는 상태로
+    // 퇴사하는 직원에게 걸린 after 이후 대타 요청을 정리한다. 승인 대기 중인 대타였으면 다시 대타를 찾는 상태로
     @Transactional
-    public void releaseSubstitute(Employee employee) {
+    public void releaseSubstitute(Employee employee, LocalDate after) {
         for (SwapOffer offer : offerRepository.findByCandidateIdAndStatusOrderBySentAtDesc(employee.getId(), OfferStatus.SENT)) {
-            offer.respond(OfferStatus.CLOSED);
             SwapRequest request = offer.getSwapRequest();
+            if (!request.getWorkDate().isAfter(after)) {
+                continue;
+            }
+            offer.respond(OfferStatus.CLOSED);
             boolean stillWaiting = offerRepository.findBySwapRequestIdOrderBySentAtAsc(request.getId()).stream()
                     .anyMatch(SwapOffer::isPending);
             if (request.getStatus() == SwapStatus.OFFERED && !stillWaiting) {
@@ -358,7 +361,8 @@ public class SwapRequestService {
             }
         }
         swapRequestRepository.findByStoreIdOrderByCreatedAtDesc(employee.getStore().getId()).stream()
-                .filter(r -> r.getStatus() == SwapStatus.PENDING_APPROVAL && r.getSubstitute().getId().equals(employee.getId()))
+                .filter(r -> r.getStatus() == SwapStatus.PENDING_APPROVAL && r.getSubstitute().getId().equals(employee.getId())
+                        && r.getWorkDate().isAfter(after))
                 .forEach(r -> {
                     r.reopen();
                     fcmService.send(r.getRequester().getUser(), "대타 취소",

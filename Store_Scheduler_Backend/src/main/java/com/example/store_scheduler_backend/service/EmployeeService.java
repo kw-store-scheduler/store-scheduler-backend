@@ -108,7 +108,7 @@ public class EmployeeService {
         );
     }
 
-    // 마지막 근무일이 지난 뒤(또는 당일) 처리한다. 지난 근무와 급여 기록은 남기고 이후 근무만 지운다
+    // 지난 근무와 급여 기록은 남기고 마지막 근무일 이후 근무만 지운다. 미래 날짜면 그날까지 앱을 쓰도록 예약만 하고, 지나면 작업이 마무리한다
     @Transactional
     public Resignation resign(Long storeId, Long employeeId, LocalDate lastWorkDate, String managerUsername) {
         Store store = storeAccessGuard.verifyOwner(storeId, managerUsername);
@@ -120,21 +120,51 @@ public class EmployeeService {
             throw new IllegalArgumentException("승인된 직원만 퇴사 처리할 수 있습니다.");
         }
         LocalDate last = lastWorkDate != null ? lastWorkDate : LocalDate.now();
-        if (last.isAfter(LocalDate.now())) {
-            throw new IllegalArgumentException("마지막 근무일은 오늘 이후일 수 없습니다. 근무를 마친 뒤 처리해주세요.");
-        }
         List<Schedule> removed = scheduleRepository.findByStoreIdAndEmployeeIdOrderByWorkDateAscStartTimeAsc(storeId, employeeId).stream()
                 .filter(s -> s.getWorkDate().isAfter(last))
                 .toList();
         swapRequestService.detachSchedules(removed);
         shiftTradeService.detachSchedules(removed.stream().map(Schedule::getId).toList());
         scheduleRepository.deleteAll(removed);
-        swapRequestService.releaseSubstitute(employee);
-        shiftTradeService.cancelOpenOf(employee);
-        openShiftService.withdrawAll(employee);
-        employee.resign(last);
-        profileService.recordChange(employee, store.getName() + " 퇴사 처리 (마지막 근무일 " + last + ")");
+        swapRequestService.releaseSubstitute(employee, last);
+        shiftTradeService.cancelOpenOf(employee, last);
+        openShiftService.withdrawAll(employee, last);
+        if (last.isAfter(LocalDate.now())) {
+            employee.scheduleResignation(last);
+            profileService.recordChange(employee, store.getName() + " 퇴사 예정 (마지막 근무일 " + last + ")");
+        } else {
+            finishResignation(employee, last);
+        }
         return new Resignation(last, removed.size());
+    }
+
+    @Transactional
+    public void cancelScheduledResignation(Long storeId, Long employeeId, String managerUsername) {
+        storeAccessGuard.verifyOwner(storeId, managerUsername);
+        Employee employee = findOne(employeeId);
+        if (!employee.getStore().getId().equals(storeId) || employee.getStatus() != EmployeeStatus.APPROVED
+                || employee.getResignedOn() == null) {
+            throw new IllegalArgumentException("퇴사 예정인 직원이 아닙니다.");
+        }
+        employee.cancelScheduledResignation();
+        profileService.recordChange(employee, "퇴사 예정 취소");
+    }
+
+    // 예약한 마지막 근무일이 지난 직원을 퇴사 처리한다
+    @Transactional
+    public int finishDueResignations(LocalDate today) {
+        List<Employee> due = employeeRepository.findByStatusAndResignedOnBefore(EmployeeStatus.APPROVED, today);
+        due.forEach(employee -> finishResignation(employee, employee.getResignedOn()));
+        return due.size();
+    }
+
+    private void finishResignation(Employee employee, LocalDate last) {
+        // 예약 뒤에 받은 요청까지 모두 닫는다
+        swapRequestService.releaseSubstitute(employee, LocalDate.MIN);
+        shiftTradeService.cancelOpenOf(employee, LocalDate.MIN);
+        openShiftService.withdrawAll(employee, LocalDate.MIN);
+        employee.resign(last);
+        profileService.recordChange(employee, employee.getStore().getName() + " 퇴사 처리 (마지막 근무일 " + last + ")");
     }
 
     public List<Employee> findResignedByStore(Long storeId, String managerUsername) {

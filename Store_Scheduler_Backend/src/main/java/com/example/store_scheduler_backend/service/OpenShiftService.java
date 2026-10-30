@@ -205,10 +205,11 @@ public class OpenShiftService {
         application.withdraw();
     }
 
-    // 퇴사하는 직원의 지원을 거둔다
+    // 퇴사하는 직원의 after 이후 근무 지원을 거둔다
     @Transactional
-    public void withdrawAll(Employee employee) {
-        applicationRepository.findByEmployeeIdAndStatus(employee.getId(), ApplicationStatus.APPLIED)
+    public void withdrawAll(Employee employee, LocalDate after) {
+        applicationRepository.findByEmployeeIdAndStatus(employee.getId(), ApplicationStatus.APPLIED).stream()
+                .filter(a -> a.getOpenShift().getWorkDate().isAfter(after))
                 .forEach(ShiftApplication::withdraw);
     }
 

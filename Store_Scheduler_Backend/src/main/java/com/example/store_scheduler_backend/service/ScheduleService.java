@@ -66,6 +66,7 @@ public class ScheduleService {
         Store store = storeAccessGuard.verifyOwner(storeId, managerUsername);
         Employee employee = findApproved(storeId, employeeId);
         requireValidTimes(startTime, endTime);
+        requireStillEmployed(employee, workDate);
         requireAllowed(storeId, employee, workDate, startTime, endTime, List.of(), force);
 
         Schedule schedule = new Schedule();
@@ -95,6 +96,7 @@ public class ScheduleService {
         }
         Employee before = schedule.getEmployee();
         Employee after = employeeId != null && !employeeId.equals(before.getId()) ? findApproved(storeId, employeeId) : before;
+        requireStillEmployed(after, workDate);
         requireAllowed(storeId, after, workDate, startTime, endTime, List.of(schedule), force);
 
         LocalDate beforeDate = schedule.getWorkDate();
@@ -133,6 +135,12 @@ public class ScheduleService {
                     throw new IllegalArgumentException(employee.getDisplayName() + "님에게 배정할 수 없습니다: " + blocker
                             + ". 그래도 배정하려면 force로 요청해주세요.");
                 });
+    }
+
+    private static void requireStillEmployed(Employee employee, LocalDate workDate) {
+        if (employee.isGoneBy(workDate)) {
+            throw new IllegalArgumentException(employee.getDisplayName() + "님의 마지막 근무일(" + employee.getResignedOn() + ") 뒤에는 배정할 수 없습니다.");
+        }
     }
 
     private static void requireValidTimes(LocalTime startTime, LocalTime endTime) {
