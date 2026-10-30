@@ -137,14 +137,26 @@ public class ScheduleController {
         return ResponseEntity.ok(result);
     }
 
-    // 관리자: 스케줄 단건 수정
+    @Operation(summary = "근무 직접 추가", description = "휴무·가용 시간·주 52시간 같은 근무 규칙에 걸리면 400과 사유로 응답합니다. force=true면 점주 판단으로 배정합니다.")
+    @PostMapping
+    public ResponseEntity<ScheduleResponseDto> createSchedule(
+            @PathVariable Long storeId,
+            @Valid @RequestBody ScheduleCreateRequest request,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        Schedule created = scheduleService.create(storeId, request.getEmployeeId(), request.getWorkDate(), request.getStartTime(),
+                request.getEndTime(), Boolean.TRUE.equals(request.getForce()), userDetails.getUsername());
+        return ResponseEntity.ok(new ScheduleResponseDto(created));
+    }
+
+    // 관리자: 스케줄 단건 수정. employeeId를 주면 담당자도 바꾼다
     @PutMapping("/{scheduleId}")
     public ResponseEntity<ScheduleResponseDto> updateSchedule(
             @PathVariable Long storeId,
             @PathVariable Long scheduleId,
             @Valid @RequestBody ScheduleUpdateRequest request,
             @AuthenticationPrincipal UserDetails userDetails) {
-        Schedule updated = scheduleService.update(storeId, scheduleId, request.getWorkDate(), request.getStartTime(), request.getEndTime(), userDetails.getUsername());
+        Schedule updated = scheduleService.update(storeId, scheduleId, request.getEmployeeId(), request.getWorkDate(),
+                request.getStartTime(), request.getEndTime(), Boolean.TRUE.equals(request.getForce()), userDetails.getUsername());
         return ResponseEntity.ok(new ScheduleResponseDto(updated));
     }
 
@@ -175,7 +187,27 @@ public class ScheduleController {
     }
 
     @Data
+    static class ScheduleCreateRequest {
+        @NotNull(message = "직원을 선택해주세요.")
+        private Long employeeId;
+
+        @NotNull(message = "근무 날짜를 입력해주세요.")
+        private LocalDate workDate;
+
+        @NotNull(message = "시작 시간을 입력해주세요.")
+        private LocalTime startTime;
+
+        @NotNull(message = "종료 시간을 입력해주세요.")
+        private LocalTime endTime;
+
+        private Boolean force;
+    }
+
+    @Data
     static class ScheduleUpdateRequest {
+        private Long employeeId;
+        private Boolean force;
+
         @NotNull(message = "근무 날짜를 입력해주세요.")
         private LocalDate workDate;
 
