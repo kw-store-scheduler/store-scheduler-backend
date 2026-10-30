@@ -79,7 +79,7 @@ public class HomeController {
                 home.week().stream().map(DayScheduleResponse::from).toList(),
                 home.swapOffers().stream().map(o -> SwapOfferResponse.from(o, wage)).toList(),
                 new MonthlyPayResponse(pay.getTotalHours(), pay.getRegularWage(), pay.getWeeklyHolidayPay(), pay.getNightPay(),
-                        pay.getOvertimePay(), pay.getTotalPay()),
+                        pay.getOvertimePay(), pay.getHolidayPay(), pay.getTotalPay()),
                 PreferenceStatusResponse.from(home.nextMonthPreferences()),
                 home.leaveBalance() != null ? new LeaveBalanceResponse(home.leaveBalance().entitled(),
                         home.leaveBalance().used(), home.leaveBalance().remaining()) : null,
@@ -152,7 +152,7 @@ public class HomeController {
         }
     }
 
-    record MonthlyPayResponse(double totalHours, long regularWage, long weeklyHolidayPay, long nightPay, long overtimePay,
+    record MonthlyPayResponse(double totalHours, long regularWage, long weeklyHolidayPay, long nightPay, long overtimePay, long holidayPay,
                               long totalPay) {
     }
 

@@ -21,7 +21,7 @@ public class PayrollController {
 
     private final PayrollService payrollService;
 
-    @Operation(summary = "월별 급여 계산", description = "해당 월의 근무 기록을 바탕으로 직원별 급여(기본급 + 주휴수당)를 계산합니다.")
+    @Operation(summary = "월별 급여 계산", description = "해당 월의 근무 기록을 바탕으로 직원별 급여(기본급 + 주휴수당 + 상시 5인 이상이면 야간·연장·공휴일 가산)를 계산합니다.")
     @GetMapping
     public ResponseEntity<List<PayrollService.EmployeePayroll>> getMonthlyPayroll(
             @PathVariable Long storeId,

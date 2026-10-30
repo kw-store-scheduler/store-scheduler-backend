@@ -6,10 +6,12 @@ import com.example.store_scheduler_backend.domain.EmployeeStatus;
 import com.example.store_scheduler_backend.domain.Schedule;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.domain.User;
+import com.example.store_scheduler_backend.domain.WageChange;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
 import com.example.store_scheduler_backend.repository.ScheduleRepository;
 import com.example.store_scheduler_backend.repository.StoreRepository;
 import com.example.store_scheduler_backend.repository.UserRepository;
+import com.example.store_scheduler_backend.repository.WageChangeRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,6 +34,7 @@ public class EmployeeService {
     private final SwapRequestService swapRequestService;
     private final ShiftTradeService shiftTradeService;
     private final OpenShiftService openShiftService;
+    private final WageChangeRepository wageChangeRepository;
 
     // removedShifts: 마지막 근무일 뒤에 잡혀 있어 지운 근무 수. 비게 된 자리는 점주가 채운다
     public record Resignation(LocalDate lastWorkDate, int removedShifts) {
@@ -76,6 +79,8 @@ public class EmployeeService {
         if (employee.getStatus() != EmployeeStatus.PENDING) {
             throw new IllegalArgumentException("대기 중인 신청만 처리할 수 있습니다.");
         }
+        // 재합류하며 시급이 바뀌면 이전 근무의 급여가 달라지지 않게 남긴다
+        recordWageChange(employee, hourlyWage);
         employee.approve(hourlyWage, employmentType);
 
         fcmService.send(employee.getUser(),
@@ -158,12 +163,22 @@ public class EmployeeService {
         }
         Integer beforeWage = employee.getHourlyWage();
         EmploymentType beforeType = employee.getEmploymentType();
+        if (hourlyWage != null) {
+            recordWageChange(employee, hourlyWage);
+        }
         employee.updateInfo(name, phoneNumber, hourlyWage, employmentType);
         if (hourlyWage != null && !hourlyWage.equals(beforeWage)) {
             profileService.recordChange(employee, "시급 " + beforeWage + "원 → " + hourlyWage + "원");
         }
         if (employmentType != null && employmentType != beforeType) {
             profileService.recordChange(employee, "고용 형태 " + (employmentType == EmploymentType.FULL_TIME ? "직원" : "알바") + "(으)로 변경");
+        }
+    }
+
+    private void recordWageChange(Employee employee, int newWage) {
+        Integer current = employee.getHourlyWage();
+        if (current != null && current > 0 && current != newWage) {
+            wageChangeRepository.save(new WageChange(employee, LocalDate.now(), current));
         }
     }
 
