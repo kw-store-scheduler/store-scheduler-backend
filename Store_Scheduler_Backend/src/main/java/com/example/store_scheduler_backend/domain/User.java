@@ -35,6 +35,10 @@ public class User {
         this.role = role;
     }
 
+    public void changePassword(String encodedPassword) {
+        this.password = encodedPassword;
+    }
+
     public void changeRole(Role role) {
         this.role = role;
     }

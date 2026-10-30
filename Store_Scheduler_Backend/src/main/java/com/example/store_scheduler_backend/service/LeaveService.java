@@ -25,6 +25,8 @@ public class LeaveService {
 
     private static final List<LeaveStatus> COUNTED = List.of(LeaveStatus.PENDING, LeaveStatus.APPROVED);
 
+    private static final String LEAVE_REASON = "연차";
+
     private final StoreAccessGuard storeAccessGuard;
     private final LeaveRequestRepository leaveRequestRepository;
     private final DayOffRequestRepository dayOffRequestRepository;
@@ -93,7 +95,12 @@ public class LeaveService {
         if (balance.remaining() < 1) {
             throw new IllegalArgumentException("남은 연차가 없습니다.");
         }
-        LeaveRequest saved = leaveRequestRepository.save(new LeaveRequest(me, date, reason));
+        LeaveRequest saved = leaveRequestRepository.findByEmployeeIdAndDate(me.getId(), date)
+                .map(previous -> {
+                    previous.reopen(reason);
+                    return previous;
+                })
+                .orElseGet(() -> leaveRequestRepository.save(new LeaveRequest(me, date, reason)));
         fcmService.send(me.getStore().getOwner(), "연차 신청",
                 me.getDisplayName() + "님이 " + date + " 연차를 신청했습니다.");
         return saved;
@@ -120,7 +127,7 @@ public class LeaveService {
                     dayOffRequestRepository.delete(r);
                     dayOffRequestRepository.flush();
                 });
-        dayOffRequestRepository.save(new DayOffRequest(employee, leave.getDate(), DayOffType.MUST, "연차"));
+        dayOffRequestRepository.save(new DayOffRequest(employee, leave.getDate(), DayOffType.MUST, LEAVE_REASON));
         fcmService.send(employee.getUser(), "연차 승인", leave.getDate() + " 연차가 승인되었습니다.");
         return leave;
     }
@@ -131,6 +138,26 @@ public class LeaveService {
         LeaveRequest leave = findPendingLeave(storeId, leaveId);
         leave.reject();
         fcmService.send(leave.getEmployee().getUser(), "연차 반려", leave.getDate() + " 연차가 반려되었습니다.");
+        return leave;
+    }
+
+    // 직원: 오늘 이후 연차 취소. 승인된 연차면 등록해 둔 필수 휴무도 지운다
+    @Transactional
+    public LeaveRequest cancel(Long storeId, Long leaveId, String username) {
+        Employee me = storeAccessGuard.verifyApprovedEmployee(storeId, username);
+        LeaveRequest leave = leaveRequestRepository.findById(leaveId)
+                .filter(l -> l.getEmployee().getId().equals(me.getId()) && COUNTED.contains(l.getStatus()))
+                .orElseThrow(() -> new IllegalArgumentException("취소할 수 있는 연차 신청이 아닙니다."));
+        if (leave.getDate().isBefore(LocalDate.now())) {
+            throw new IllegalArgumentException("지난 연차는 취소할 수 없습니다.");
+        }
+        if (leave.getStatus() == LeaveStatus.APPROVED) {
+            dayOffRequestRepository.findByEmployeeIdAndDate(me.getId(), leave.getDate())
+                    .filter(r -> r.getType() == DayOffType.MUST && LEAVE_REASON.equals(r.getReason()))
+                    .ifPresent(dayOffRequestRepository::delete);
+        }
+        leave.cancel();
+        fcmService.send(me.getStore().getOwner(), "연차 취소", me.getDisplayName() + "님이 " + leave.getDate() + " 연차를 취소했습니다.");
         return leave;
     }
 

@@ -44,6 +44,15 @@ public class LeaveController {
                 leaveService.request(storeId, body.getDate(), body.getReason(), userDetails.getUsername()), null));
     }
 
+    // 직원: 오늘 이후 연차 취소 (승인 대기·승인 모두)
+    @PostMapping("/api/stores/{storeId}/leaves/{leaveId}/cancel")
+    public ResponseEntity<LeaveResponse> cancel(
+            @PathVariable Long storeId,
+            @PathVariable Long leaveId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        return ResponseEntity.ok(LeaveResponse.from(leaveService.cancel(storeId, leaveId, userDetails.getUsername()), null));
+    }
+
     // 관리자: 승인 대기 연차
     @GetMapping("/api/stores/{storeId}/leaves")
     public ResponseEntity<List<LeaveResponse>> getPending(

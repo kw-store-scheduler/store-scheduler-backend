@@ -87,6 +87,11 @@ public class Store {
         return industry != null ? industry : Industry.ETC;
     }
 
+    public void updateInfo(String name, String address) {
+        this.name = name;
+        this.address = address;
+    }
+
     public void reissueCode(String newCode) {
         this.storeCode = newCode;
     }

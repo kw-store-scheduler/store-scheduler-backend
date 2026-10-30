@@ -54,6 +54,16 @@ public class StoreController {
                 store.getIndustry().getLabel(), store.getAddress(), preview.employeeCount()));
     }
 
+    // 관리자: 매장 이름·주소 수정
+    @PatchMapping("/{storeId}")
+    public ResponseEntity<StoreResponse> updateInfo(
+            @PathVariable Long storeId,
+            @Valid @RequestBody StoreInfoRequest request,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        return ResponseEntity.ok(StoreResponse.from(
+                storeService.updateInfo(storeId, request.getName(), request.getAddress(), userDetails.getUsername())));
+    }
+
     @PostMapping("/{storeId}/reissue-code")
     public ResponseEntity<StoreCreateResponse> reissueCode(
             @PathVariable Long storeId,
@@ -94,6 +104,13 @@ public class StoreController {
         private String address;
         // 생략하면 기타, 미리 만들어 주는 스킬·교대도 없음
         private Industry industry;
+    }
+
+    @Data
+    static class StoreInfoRequest {
+        @NotBlank(message = "매장 이름을 입력해주세요.")
+        private String name;
+        private String address;
     }
 
     @Data

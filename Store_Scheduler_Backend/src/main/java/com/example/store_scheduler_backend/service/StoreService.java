@@ -90,6 +90,13 @@ public class StoreService {
     }
 
     @Transactional
+    public Store updateInfo(Long storeId, String name, String address, String managerUsername) {
+        Store store = storeAccessGuard.verifyOwner(storeId, managerUsername);
+        store.updateInfo(name, address);
+        return store;
+    }
+
+    @Transactional
     public String reissueCode(Long storeId, String managerUsername) {
         Store store = storeAccessGuard.verifyOwner(storeId, managerUsername);
         String newCode = UUID.randomUUID().toString().replace("-", "").substring(0, 8).toUpperCase();

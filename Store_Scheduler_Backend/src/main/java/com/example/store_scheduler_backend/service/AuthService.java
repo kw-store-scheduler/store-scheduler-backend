@@ -1,18 +1,31 @@
 package com.example.store_scheduler_backend.service;
 
 import com.example.store_scheduler_backend.domain.Employee;
+import com.example.store_scheduler_backend.domain.RefreshToken;
 import com.example.store_scheduler_backend.domain.Role;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.domain.User;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
+import com.example.store_scheduler_backend.repository.RefreshTokenRepository;
 import com.example.store_scheduler_backend.repository.StoreRepository;
 import com.example.store_scheduler_backend.repository.UserRepository;
 import com.example.store_scheduler_backend.security.JwtTokenProvider;
+import com.example.store_scheduler_backend.security.LoginAttemptLimiter;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.web.server.ResponseStatusException;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
+import java.time.Duration;
+import java.time.LocalDateTime;
+import java.util.Base64;
+import java.util.HexFormat;
 import java.util.List;
 
 @Service
@@ -24,6 +37,14 @@ public class AuthService {
     private final JwtTokenProvider jwtTokenProvider;
     private final StoreRepository storeRepository;
     private final EmployeeRepository employeeRepository;
+    private final RefreshTokenRepository refreshTokenRepository;
+    private final LoginAttemptLimiter loginAttemptLimiter;
+
+    private static final Duration REFRESH_VALIDITY = Duration.ofDays(14);
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+
+    public record Tokens(String token, String refreshToken) {
+    }
 
     public record Me(User user, List<Store> ownedStores, List<Employee> memberships) {
     }
@@ -36,13 +57,56 @@ public class AuthService {
         userRepository.save(new User(username, passwordEncoder.encode(password), role));
     }
 
-    public String login(String username, String password) {
-        User user = userRepository.findByUsername(username)
-                .orElseThrow(() -> new IllegalArgumentException("아이디 또는 비밀번호가 올바르지 않습니다."));
-        if (!passwordEncoder.matches(password, user.getPassword())) {
+    @Transactional
+    public Tokens login(String username, String password) {
+        if (loginAttemptLimiter.isBlocked(username)) {
+            throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS);
+        }
+        User user = userRepository.findByUsername(username).orElse(null);
+        if (user == null || !passwordEncoder.matches(password, user.getPassword())) {
+            loginAttemptLimiter.recordFailure(username);
             throw new IllegalArgumentException("아이디 또는 비밀번호가 올바르지 않습니다.");
         }
-        return jwtTokenProvider.createToken(user.getUsername(), user.getRole().name());
+        loginAttemptLimiter.reset(username);
+        return issue(user);
+    }
+
+    // 쓴 리프레시 토큰은 바로 폐기하고 새로 발급한다
+    @Transactional
+    public Tokens refresh(String refreshToken) {
+        RefreshToken stored = refreshTokenRepository.findByTokenHash(hash(refreshToken))
+                .filter(t -> t.getExpiresAt().isAfter(LocalDateTime.now()))
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED));
+        User user = stored.getUser();
+        refreshTokenRepository.delete(stored);
+        return issue(user);
+    }
+
+    // 다른 기기의 로그인을 끊기 위해 리프레시 토큰을 모두 지운다
+    @Transactional
+    public void changePassword(String username, String currentPassword, String newPassword) {
+        User user = findUser(username);
+        if (!passwordEncoder.matches(currentPassword, user.getPassword())) {
+            throw new IllegalArgumentException("현재 비밀번호가 올바르지 않습니다.");
+        }
+        user.changePassword(passwordEncoder.encode(newPassword));
+        refreshTokenRepository.deleteByUserId(user.getId());
+    }
+
+    private Tokens issue(User user) {
+        byte[] random = new byte[32];
+        SECURE_RANDOM.nextBytes(random);
+        String refreshToken = Base64.getUrlEncoder().withoutPadding().encodeToString(random);
+        refreshTokenRepository.save(new RefreshToken(user, hash(refreshToken), LocalDateTime.now().plus(REFRESH_VALIDITY)));
+        return new Tokens(jwtTokenProvider.createToken(user.getUsername(), user.getRole().name()), refreshToken);
+    }
+
+    private static String hash(String token) {
+        try {
+            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(token.getBytes(StandardCharsets.UTF_8)));
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     @Transactional(readOnly = true)
