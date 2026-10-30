@@ -2,6 +2,7 @@ package com.example.store_scheduler_backend.service;
 
 import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.EmployeeStatus;
+import com.example.store_scheduler_backend.domain.PayDeduction;
 import com.example.store_scheduler_backend.domain.Schedule;
 import com.example.store_scheduler_backend.domain.WageChange;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
@@ -33,6 +34,11 @@ public class PayrollService {
     private static final long WEEKLY_HOLIDAY_THRESHOLD_MINUTES = 15 * 60;
     private static final long MAX_WEEKLY_HOLIDAY_MINUTES = 8 * 60;
     private static final long DAILY_REGULAR_MINUTES = 8 * 60;
+    private static final double FREELANCE_RATE = 0.033;
+    private static final double PENSION_RATE = 0.0475;
+    private static final double HEALTH_RATE = 0.03595;
+    private static final double LONG_TERM_CARE_OF_HEALTH = 0.1314;
+    private static final double EMPLOYMENT_RATE = 0.009;
 
     private final EmployeeRepository employeeRepository;
     private final ScheduleRepository scheduleRepository;
@@ -129,6 +135,8 @@ public class PayrollService {
         long weeklyHoliday = Math.round(weeklyHolidayPay);
         long overtime = Math.round(overtimePay);
         long holiday = Math.round(holidayPay);
+        long total = regular + weeklyHoliday + nightPay + overtime + holiday;
+        long deduction = deductionOf(employee.getDeduction(), total);
         return new EmployeePayroll(
                 employee.getId(),
                 employee.getName(),
@@ -139,7 +147,10 @@ public class PayrollService {
                 nightPay,
                 overtime,
                 holiday,
-                regular + weeklyHoliday + nightPay + overtime + holiday
+                total,
+                employee.getDeduction(),
+                deduction,
+                total - deduction
         );
     }
 
@@ -168,11 +179,25 @@ public class PayrollService {
 
     // 이후 변경 중 가장 이른 것의 이전 시급이 그날 시급. 이후 변경이 없으면 현재 시급
     private static int wageOn(Employee employee, List<WageChange> changes, LocalDate date) {
+        // 수습 시급을 정한 뒤 해가 바뀌어 하한이 올라도 그 아래로 계산하지 않는다
+        if (employee.isProbationWageOn(date)) {
+            return Math.max(employee.getProbationWage(), LaborPolicy.probationWageFloor(date.getYear()));
+        }
         return changes.stream()
                 .filter(c -> c.getEffectiveFrom().isAfter(date))
                 .findFirst()
                 .map(WageChange::getPreviousWage)
                 .orElse(employee.getHourlyWage() != null ? employee.getHourlyWage() : 0);
+    }
+
+    // 근로자 부담 요율(2026년 기준). 근로소득세와 보수월액 상·하한은 반영하지 않은 예상치이고, 원 단위는 절사한다
+    static long deductionOf(PayDeduction type, long total) {
+        double amount = switch (type) {
+            case NONE -> 0;
+            case FREELANCE -> total * FREELANCE_RATE;
+            case FOUR_INSURANCE -> total * (PENSION_RATE + HEALTH_RATE * (1 + LONG_TERM_CARE_OF_HEALTH) + EMPLOYMENT_RATE);
+        };
+        return (long) (amount / 10) * 10;
     }
 
     // 시작 시각부터 minutes 동안 중 22:00~06:00에 걸친 분
@@ -200,5 +225,8 @@ public class PayrollService {
         private long overtimePay;
         private long holidayPay;
         private long totalPay;
+        private PayDeduction deductionType;
+        private long deduction;
+        private long netPay;
     }
 }

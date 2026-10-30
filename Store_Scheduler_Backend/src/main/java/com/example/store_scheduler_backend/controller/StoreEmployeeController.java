@@ -2,6 +2,7 @@ package com.example.store_scheduler_backend.controller;
 
 import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.EmploymentType;
+import com.example.store_scheduler_backend.domain.PayDeduction;
 import com.example.store_scheduler_backend.domain.Skill;
 import com.example.store_scheduler_backend.service.EmployeeService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -95,6 +96,18 @@ public class StoreEmployeeController {
         return ResponseEntity.noContent().build();
     }
 
+    @Operation(summary = "수습 시급·공제 설정", description = "probationWage는 1년 이상 계약(contractOneYearOrMore)이고 단순노무(simpleLabor)가 아닐 때만, 최저임금의 90% 이상으로 정할 수 있고 수습 시작 3개월까지 적용됩니다. null이면 해제합니다. deduction은 예상 실수령액 계산용입니다.")
+    @PutMapping("/api/stores/{storeId}/employees/{employeeId}/pay-settings")
+    public ResponseEntity<EmployeeResponse> updatePaySettings(
+            @PathVariable Long storeId,
+            @PathVariable Long employeeId,
+            @RequestBody PaySettingsRequest request,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        return ResponseEntity.ok(EmployeeResponse.from(employeeService.updatePaySettings(storeId, employeeId, request.getDeduction(),
+                request.getProbationWage(), Boolean.TRUE.equals(request.getContractOneYearOrMore()),
+                Boolean.TRUE.equals(request.getSimpleLabor()), userDetails.getUsername())));
+    }
+
     // 관리자: 신청 승인
     @PostMapping("/api/stores/{storeId}/employees/{employeeId}/approve")
     public ResponseEntity<Void> approve(
@@ -126,6 +139,14 @@ public class StoreEmployeeController {
             @AuthenticationPrincipal UserDetails userDetails) {
         employeeService.reject(storeId, employeeId, userDetails.getUsername());
         return ResponseEntity.ok().build();
+    }
+
+    @Data
+    static class PaySettingsRequest {
+        private PayDeduction deduction;
+        private Integer probationWage;
+        private Boolean contractOneYearOrMore;
+        private Boolean simpleLabor;
     }
 
     @Data
@@ -177,6 +198,8 @@ public class StoreEmployeeController {
         private String nickname;
         private String phoneNumber;
         private Integer hourlyWage;
+        private Integer probationWage;
+        private PayDeduction deduction;
         private String status;
         private EmploymentType employmentType;
         private LocalDate startDate;
@@ -193,6 +216,8 @@ public class StoreEmployeeController {
                     e.getNickname(),
                     e.getPhoneNumber(),
                     e.getHourlyWage(),
+                    e.getProbationWage(),
+                    e.getDeduction(),
                     e.getStatus().name(),
                     e.getEmploymentType(),
                     e.getStartDate(),
