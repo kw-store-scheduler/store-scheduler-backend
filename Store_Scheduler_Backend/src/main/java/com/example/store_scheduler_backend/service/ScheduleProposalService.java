@@ -137,7 +137,7 @@ public class ScheduleProposalService {
     @Transactional
     public int remindUnseen(Long storeId, Long proposalId, String managerUsername) {
         List<ScheduleAcknowledgement> unseen = findAcknowledgements(storeId, proposalId, managerUsername).stream()
-                .filter(a -> a.getSeenAt() == null)
+                .filter(a -> a.getSeenAt() == null && a.getEmployee().getStatus() == EmployeeStatus.APPROVED)
                 .toList();
         for (ScheduleAcknowledgement a : unseen) {
             a.remind();

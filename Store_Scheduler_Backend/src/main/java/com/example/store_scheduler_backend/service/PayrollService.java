@@ -41,10 +41,15 @@ public class PayrollService {
         LocalDate start = yearMonth.atDay(1);
         LocalDate end = yearMonth.atEndOfMonth();
 
-        List<Employee> employees = employeeRepository.findByStoreIdAndStatus(storeId, EmployeeStatus.APPROVED);
+        List<Employee> employees = employeeRepository.findByStoreIdAndStatusIn(storeId,
+                List.of(EmployeeStatus.APPROVED, EmployeeStatus.RESIGNED));
         List<EmployeePayroll> result = new ArrayList<>();
         for (Employee employee : employees) {
-            result.add(calculateForEmployee(employee, start, end));
+            EmployeePayroll payroll = calculateForEmployee(employee, start, end);
+            // 퇴사한 직원은 그달 근무가 있을 때만 정산 대상
+            if (employee.getStatus() == EmployeeStatus.APPROVED || payroll.getTotalHours() > 0) {
+                result.add(payroll);
+            }
         }
         return result;
     }

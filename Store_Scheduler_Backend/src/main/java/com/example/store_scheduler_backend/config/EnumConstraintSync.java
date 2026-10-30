@@ -1,5 +1,6 @@
 package com.example.store_scheduler_backend.config;
 
+import com.example.store_scheduler_backend.domain.EmployeeStatus;
 import com.example.store_scheduler_backend.domain.SwapStatus;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -25,7 +26,9 @@ public class EnumConstraintSync implements ApplicationRunner {
     private record EnumColumn(String table, String column, Class<? extends Enum<?>> type) {
     }
 
-    private static final List<EnumColumn> COLUMNS = List.of(new EnumColumn("swap_request", "status", SwapStatus.class));
+    private static final List<EnumColumn> COLUMNS = List.of(
+            new EnumColumn("swap_request", "status", SwapStatus.class),
+            new EnumColumn("employee", "status", EmployeeStatus.class));
 
     private final DataSource dataSource;
     private final JdbcTemplate jdbcTemplate;

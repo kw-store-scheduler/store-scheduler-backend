@@ -325,6 +325,27 @@ public class SwapRequestService {
         requests.forEach(SwapRequest::detachSchedule);
     }
 
+    // 퇴사하는 직원에게 걸린 대타 요청을 정리한다. 승인 대기 중인 대타였으면 다시 대타를 찾는 상태로
+    @Transactional
+    public void releaseSubstitute(Employee employee) {
+        for (SwapOffer offer : offerRepository.findByCandidateIdAndStatusOrderBySentAtDesc(employee.getId(), OfferStatus.SENT)) {
+            offer.respond(OfferStatus.CLOSED);
+            SwapRequest request = offer.getSwapRequest();
+            boolean stillWaiting = offerRepository.findBySwapRequestIdOrderBySentAtAsc(request.getId()).stream()
+                    .anyMatch(SwapOffer::isPending);
+            if (request.getStatus() == SwapStatus.OFFERED && !stillWaiting) {
+                request.reopen();
+            }
+        }
+        swapRequestRepository.findByStoreIdOrderByCreatedAtDesc(employee.getStore().getId()).stream()
+                .filter(r -> r.getStatus() == SwapStatus.PENDING_APPROVAL && r.getSubstitute().getId().equals(employee.getId()))
+                .forEach(r -> {
+                    r.reopen();
+                    fcmService.send(r.getRequester().getUser(), "대타 취소",
+                            r.getWorkDate() + " 근무 대타가 퇴사해 다시 대타를 찾아야 해요.");
+                });
+    }
+
     // 30분 안에 아무도 수락하지 않은 요청은 만료시키고 게시판으로 넘긴다
     @Transactional
     public int expireStaleOffers(LocalDateTime now) {

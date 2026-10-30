@@ -35,6 +35,9 @@ public class Employee {
 
     private LocalDateTime requestedAt;
 
+    // 퇴사 처리한 직원의 마지막 근무일
+    private LocalDate resignedOn;
+
     // 정규직 직책. 알바는 null
     @Enumerated(EnumType.STRING)
     private StaffPosition position;
@@ -158,6 +161,7 @@ public class Employee {
 
     public void approve(int hourlyWage, EmploymentType employmentType) {
         this.status = EmployeeStatus.APPROVED;
+        this.resignedOn = null;
         this.hourlyWage = hourlyWage;
         if (employmentType != null) this.employmentType = employmentType;
     }
@@ -168,6 +172,19 @@ public class Employee {
 
     public void reject() {
         this.status = EmployeeStatus.REJECTED;
+    }
+
+    public void resign(LocalDate lastWorkDate) {
+        this.status = EmployeeStatus.RESIGNED;
+        this.resignedOn = lastWorkDate;
+    }
+
+    // 거절됐거나 퇴사한 직원의 재합류 신청. 근무·급여 이력이 이어지도록 같은 행을 쓴다
+    public void reapply(String name, String phoneNumber) {
+        this.name = name;
+        this.phoneNumber = phoneNumber;
+        this.status = EmployeeStatus.PENDING;
+        this.requestedAt = LocalDateTime.now();
     }
 
     public void updateHourlyWage(int hourlyWage) {

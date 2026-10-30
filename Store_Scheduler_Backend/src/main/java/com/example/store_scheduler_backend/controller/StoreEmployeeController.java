@@ -4,6 +4,7 @@ import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.EmploymentType;
 import com.example.store_scheduler_backend.domain.Skill;
 import com.example.store_scheduler_backend.service.EmployeeService;
+import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.Min;
@@ -63,6 +64,27 @@ public class StoreEmployeeController {
         return ResponseEntity.ok(result);
     }
 
+    // 관리자: 퇴사한 직원 목록
+    @GetMapping("/api/stores/{storeId}/employees/resigned")
+    public ResponseEntity<List<EmployeeResponse>> getResignedEmployees(
+            @PathVariable Long storeId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        return ResponseEntity.ok(employeeService.findResignedByStore(storeId, userDetails.getUsername()).stream()
+                .map(EmployeeResponse::from)
+                .toList());
+    }
+
+    @Operation(summary = "퇴사 처리", description = "lastWorkDate를 생략하면 오늘입니다. 지난 근무와 급여 기록은 남고, 이후 근무는 지워지며(removedShifts), 진행 중인 대타·근무 바꾸기·지원은 닫힙니다.")
+    @PostMapping("/api/stores/{storeId}/employees/{employeeId}/resign")
+    public ResponseEntity<EmployeeService.Resignation> resign(
+            @PathVariable Long storeId,
+            @PathVariable Long employeeId,
+            @RequestBody(required = false) ResignRequest request,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        return ResponseEntity.ok(employeeService.resign(storeId, employeeId,
+                request != null ? request.getLastWorkDate() : null, userDetails.getUsername()));
+    }
+
     // 관리자: 신청 승인
     @PostMapping("/api/stores/{storeId}/employees/{employeeId}/approve")
     public ResponseEntity<Void> approve(
@@ -94,6 +116,11 @@ public class StoreEmployeeController {
             @AuthenticationPrincipal UserDetails userDetails) {
         employeeService.reject(storeId, employeeId, userDetails.getUsername());
         return ResponseEntity.ok().build();
+    }
+
+    @Data
+    static class ResignRequest {
+        private LocalDate lastWorkDate;
     }
 
     @Data
