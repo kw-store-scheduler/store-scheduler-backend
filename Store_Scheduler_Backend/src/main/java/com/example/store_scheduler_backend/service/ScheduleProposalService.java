@@ -23,6 +23,7 @@ import org.springframework.transaction.annotation.Transactional;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 
+import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -73,7 +74,12 @@ public class ScheduleProposalService {
         List<Shift> shifts = shiftRepository.findByStoreId(storeId);
         StaffingPlanService.Plan plan = staffingPlanService.planFor(storeId, proposal.getWeekStart(), proposal.getPeriodEnd());
         List<Schedule> schedules = new ArrayList<>();
+        // 이미 지난 날짜는 실제 근무 기록이자 급여 근거라 후보안으로 덮어쓰지 않는다
+        LocalDate today = LocalDate.now();
         for (Assignment a : candidates.get(candidateIndex).assignments()) {
+            if (a.workDate().isBefore(today)) {
+                continue;
+            }
             Employee employee = employeeById.get(a.employeeId());
             if (employee == null) {
                 // 후보안 생성 이후 퇴사·승인 취소된 직원이 있으면 그대로 반영할 수 없다
@@ -100,7 +106,9 @@ public class ScheduleProposalService {
         }
 
         List<Schedule> replaced = scheduleRepository.findByStoreIdAndWorkDateBetween(
-                storeId, proposal.getWeekStart(), proposal.getPeriodEnd());
+                storeId, proposal.getWeekStart(), proposal.getPeriodEnd()).stream()
+                .filter(s -> !s.getWorkDate().isBefore(today))
+                .toList();
         swapRequestService.detachSchedules(replaced);
         shiftTradeService.detachSchedules(replaced.stream().map(Schedule::getId).toList());
         scheduleRepository.deleteAll(replaced);

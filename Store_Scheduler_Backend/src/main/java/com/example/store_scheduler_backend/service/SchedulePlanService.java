@@ -4,8 +4,11 @@ import com.example.store_scheduler_backend.domain.ScheduleCycle;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.repository.ScheduleProposalRepository;
 import com.example.store_scheduler_backend.repository.StoreRepository;
+import com.example.store_scheduler_backend.dto.ScheduleProposalResponse;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.DayOfWeek;
@@ -15,6 +18,7 @@ import java.time.YearMonth;
 import java.time.temporal.TemporalAdjusters;
 
 // 매장 근무표 주기: 다음 기간, 자동 생성 시각, 희망 제출 마감
+@Slf4j
 @Service
 @Transactional(readOnly = true)
 @RequiredArgsConstructor
@@ -61,29 +65,47 @@ public class SchedulePlanService {
     }
 
     // 자동 생성 시각이 지났고 그 기간 후보안이 아직 없으면 만든다. 만든 매장 수를 돌려준다
-    @Transactional
+    // 매장마다 후보안 생성의 트랜잭션이 따로 돌아야 한 매장의 실패가 다른 매장까지 되돌리지 않는다
+    @Transactional(propagation = Propagation.SUPPORTS)
     public int generateDue(LocalDateTime now) {
         int generated = 0;
         for (Store store : storeRepository.findByAutoGenerateTrue()) {
             Plan plan = planOf(store, now.toLocalDate());
-            if (now.isBefore(plan.generateAt()) || proposalRepository.existsByStoreIdAndWeekStart(store.getId(), plan.periodStart())) {
+            if (now.isBefore(plan.generateAt()) || plan.periodStart().equals(store.getAutoGenerateFailedFor())
+                    || proposalRepository.existsByStoreIdAndWeekStart(store.getId(), plan.periodStart())) {
                 continue;
             }
-            String owner = store.getOwner().getUsername();
             try {
-                switch (plan.cycle()) {
-                    case WEEKLY -> automationService.generateProposal(store.getId(), plan.periodStart(), owner);
-                    case BIWEEKLY -> automationService.generateBiweeklyProposal(store.getId(), plan.periodStart(), owner);
-                    case MONTHLY -> automationService.generateMonthlyProposal(store.getId(), YearMonth.from(plan.periodStart()), owner);
+                ScheduleProposalResponse result = generate(store, plan);
+                if (result.isSuccess()) {
+                    fcmService.send(store.getOwner(), "근무표 3안이 준비됐어요",
+                            plan.periodStart() + "부터의 근무표 후보안을 비교하고 확정해주세요.");
+                    generated++;
+                } else {
+                    notifyFailure(store, plan, result.getMessage());
                 }
-                fcmService.send(store.getOwner(), "근무표 3안이 준비됐어요",
-                        plan.periodStart() + "부터의 근무표 후보안을 비교하고 확정해주세요.");
-                generated++;
             } catch (IllegalArgumentException e) {
-                // 직원이나 교대가 없는 매장은 건너뛴다
-                fcmService.send(store.getOwner(), "근무표 자동 생성 실패", e.getMessage());
+                notifyFailure(store, plan, e.getMessage());
+            } catch (RuntimeException e) {
+                log.error("근무표 자동 생성 실패: store={}", store.getId(), e);
+                notifyFailure(store, plan, "근무표를 만들지 못했어요. 직접 생성해주세요.");
             }
         }
         return generated;
+    }
+
+    private ScheduleProposalResponse generate(Store store, Plan plan) {
+        String owner = store.getOwner().getUsername();
+        return switch (plan.cycle()) {
+            case WEEKLY -> automationService.generateProposal(store.getId(), plan.periodStart(), owner);
+            case BIWEEKLY -> automationService.generateBiweeklyProposal(store.getId(), plan.periodStart(), owner);
+            case MONTHLY -> automationService.generateMonthlyProposal(store.getId(), YearMonth.from(plan.periodStart()), owner);
+        };
+    }
+
+    private void notifyFailure(Store store, Plan plan, String message) {
+        store.markAutoGenerateFailed(plan.periodStart());
+        storeRepository.save(store);
+        fcmService.send(store.getOwner(), "근무표 자동 생성 실패", message);
     }
 }

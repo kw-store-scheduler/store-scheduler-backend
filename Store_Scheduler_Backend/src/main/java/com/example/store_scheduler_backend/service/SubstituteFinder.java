@@ -10,6 +10,7 @@ import com.example.store_scheduler_backend.domain.FixedSchedule;
 import com.example.store_scheduler_backend.domain.UnavailablePeriod;
 import com.example.store_scheduler_backend.domain.PreferenceLevel;
 import com.example.store_scheduler_backend.domain.Schedule;
+import com.example.store_scheduler_backend.domain.Shift;
 import com.example.store_scheduler_backend.domain.ShiftPreference;
 import com.example.store_scheduler_backend.domain.Skill;
 import com.example.store_scheduler_backend.domain.Store;
@@ -22,6 +23,7 @@ import com.example.store_scheduler_backend.repository.UnavailablePeriodRepositor
 import com.example.store_scheduler_backend.repository.PreferenceSubmissionRepository;
 import com.example.store_scheduler_backend.repository.ShiftPreferenceRepository;
 import com.example.store_scheduler_backend.repository.ScheduleRepository;
+import com.example.store_scheduler_backend.repository.ShiftRepository;
 import com.example.store_scheduler_backend.repository.ShiftSkillRequirementRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
@@ -61,11 +63,13 @@ public class SubstituteFinder {
     private final FixedScheduleRepository fixedScheduleRepository;
     private final UnavailablePeriodRepository periodRepository;
     private final StoreRepository storeRepository;
+    private final ShiftRepository shiftRepository;
     private static final LocalTime END_OF_DAY = LocalTime.of(23, 59);
 
     // 그달 희망을 제출했거나 칸을 고른 직원은 요일별 가용 시간 대신 제출한 칸으로 판단한다
     private record MonthPreferences(Set<Long> submitted, Map<Long, List<ShiftPreference>> onDate,
-                                    Map<Long, List<FixedSchedule>> fixed, Map<Long, List<UnavailablePeriod>> periods) {
+                                    Map<Long, List<FixedSchedule>> fixed, Map<Long, List<UnavailablePeriod>> periods,
+                                    List<Shift> shifts) {
         boolean usesPreferences(Employee employee) {
             return submitted.contains(employee.getId());
         }
@@ -74,6 +78,19 @@ public class SubstituteFinder {
             return onDate.getOrDefault(employee.getId(), List.of()).stream()
                     .filter(p -> p.getShift().getStartTime().equals(start) && p.getShift().getEndTime().equals(end))
                     .findFirst();
+        }
+
+        // 일부 결원·추가 모집처럼 교대와 시간이 다른 근무는 그 시간을 포함하는 칸으로 판단한다. 포함하는 교대가 없으면 고를 수 있던 칸이 없었던 것
+        boolean markedUnavailable(Employee employee, LocalTime start, LocalTime end) {
+            boolean selectable = shifts.stream().anyMatch(s -> contains(s, start, end));
+            return selectable && onDate.getOrDefault(employee.getId(), List.of()).stream()
+                    .noneMatch(p -> contains(p.getShift(), start, end));
+        }
+
+        private static boolean contains(Shift shift, LocalTime start, LocalTime end) {
+            int from = start.toSecondOfDay() / 60;
+            int to = end.isAfter(start) ? end.toSecondOfDay() / 60 : end.toSecondOfDay() / 60 + 24 * 60;
+            return shift.getStartTime().toSecondOfDay() / 60 <= from && to <= ScheduleAutomationService.endMinutes(shift);
         }
     }
 
@@ -175,8 +192,9 @@ public class SubstituteFinder {
                     r.add("희망 휴무 신청일");
                 }
                 if (preferences.usesPreferences(employee)) {
-                    r.add(preferences.slot(employee, start, end).map(ShiftPreference::getLevel).orElseThrow() == PreferenceLevel.PREFERRED
-                            ? "희망 제출: 선호 칸" : "희망 제출: 가능 칸");
+                    r.add(preferences.slot(employee, start, end)
+                            .map(p -> p.getLevel() == PreferenceLevel.PREFERRED ? "희망 제출: 선호 칸" : "희망 제출: 가능 칸")
+                            .orElse("교대와 시간이 다른 근무"));
                 } else if (availabilityByEmployee.get(employee.getId()) != null) {
                     r.add("가용 시간 " + availabilityByEmployee.get(employee.getId()).getStartTime()
                             + "~" + availabilityByEmployee.get(employee.getId()).getEndTime());
@@ -264,7 +282,7 @@ public class SubstituteFinder {
         Map<Long, List<UnavailablePeriod>> periods = periodRepository
                 .findByEmployee_StoreIdAndEndDateGreaterThanEqualAndStartDateLessThanEqual(storeId, date, date).stream()
                 .collect(Collectors.groupingBy(p -> p.getEmployee().getId()));
-        return new MonthPreferences(submitted, onDate, fixed, periods);
+        return new MonthPreferences(submitted, onDate, fixed, periods, shiftRepository.findByStoreId(storeId));
     }
 
     private Optional<String> findBlocker(Employee employee, Availability availability, MonthPreferences preferences,
@@ -292,7 +310,7 @@ public class SubstituteFinder {
             availability = new Availability(employee, date.getDayOfWeek(), LocalTime.MIN, END_OF_DAY);
         }
         if (preferences.usesPreferences(employee)) {
-            if (preferences.slot(employee, start, end).isEmpty()) {
+            if (preferences.markedUnavailable(employee, start, end)) {
                 return Optional.of("희망 제출에서 근무 불가로 표시한 칸");
             }
         } else if (availability == null) {
