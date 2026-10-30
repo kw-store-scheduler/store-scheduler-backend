@@ -9,6 +9,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -81,6 +82,14 @@ public class UserController {
                         .toList()));
     }
 
+    @PatchMapping("/me/password")
+    public ResponseEntity<Void> changePassword(
+            @Valid @RequestBody PasswordRequest request,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        authService.changePassword(userDetails.getUsername(), request.getCurrentPassword(), request.getNewPassword());
+        return ResponseEntity.ok().build();
+    }
+
     // 역할을 바꾸면 새 토큰을 돌려준다
     @PatchMapping("/me/role")
     public ResponseEntity<TokenResponse> changeRole(
@@ -102,6 +111,15 @@ public class UserController {
     static class DeviceTokenRequest {
         @NotBlank(message = "디바이스 토큰을 입력해주세요.")
         private String deviceToken;
+    }
+
+    @Data
+    static class PasswordRequest {
+        @NotBlank(message = "현재 비밀번호를 입력해주세요.")
+        private String currentPassword;
+        @NotBlank(message = "새 비밀번호를 입력해주세요.")
+        @Size(min = 8, message = "비밀번호는 8자 이상이어야 합니다.")
+        private String newPassword;
     }
 
     @Data

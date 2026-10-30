@@ -46,6 +46,17 @@ public class LeaveRequest {
         this.status = LeaveStatus.APPROVED;
     }
 
+    public void cancel() {
+        this.status = LeaveStatus.CANCELLED;
+    }
+
+    // 날짜마다 한 행이라 반려·취소한 날을 다시 신청하면 같은 행을 쓴다
+    public void reopen(String reason) {
+        this.reason = reason;
+        this.status = LeaveStatus.PENDING;
+        this.createdAt = LocalDateTime.now();
+    }
+
     public void reject() {
         this.status = LeaveStatus.REJECTED;
     }

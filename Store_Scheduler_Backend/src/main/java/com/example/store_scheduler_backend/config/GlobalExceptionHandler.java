@@ -24,7 +24,7 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Map<String, String>> handleIllegalArgument(IllegalArgumentException e) {
-        return ResponseEntity.badRequest().body(Map.of("message", e.getMessage()));
+        return ResponseEntity.badRequest().body(Map.of("message", e.getMessage() != null ? e.getMessage() : "잘못된 요청입니다."));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -76,7 +76,9 @@ public class GlobalExceptionHandler {
     private static String clientErrorMessage(HttpStatusCode status) {
         return switch (status.value()) {
             case 404 -> "요청한 주소를 찾을 수 없습니다.";
+            case 401 -> "로그인이 필요합니다. 다시 로그인해주세요.";
             case 405 -> "지원하지 않는 요청 방식입니다.";
+            case 429 -> "로그인 시도가 너무 많습니다. 잠시 후 다시 시도해주세요.";
             default -> "요청을 처리할 수 없습니다.";
         };
     }
