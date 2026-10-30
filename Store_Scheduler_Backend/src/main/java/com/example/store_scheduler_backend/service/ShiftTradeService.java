@@ -87,7 +87,7 @@ public class ShiftTradeService {
         ShiftTrade trade;
         if (type == TradeType.HANDOVER) {
             Employee target = employeeRepository.findById(targetEmployeeId == null ? -1 : targetEmployeeId)
-                    .filter(e -> e.getStore().getId().equals(storeId))
+                    .filter(e -> e.getStore().getId().equals(storeId) && !e.getId().equals(me.getId()))
                     .orElseThrow(() -> new IllegalArgumentException("넘겨받을 동료를 골라주세요."));
             requireNoBlocker(handoverBlocker(storeId, mine, target));
             trade = new ShiftTrade(TradeType.HANDOVER, mine, target, null, recurring);
@@ -95,7 +95,9 @@ public class ShiftTradeService {
             Schedule theirs = scheduleRepository.findById(targetScheduleId == null ? -1 : targetScheduleId)
                     .filter(s -> s.getStore().getId().equals(storeId) && !s.getEmployee().getId().equals(me.getId()))
                     .orElseThrow(() -> new IllegalArgumentException("바꿀 동료의 근무를 골라주세요."));
-            if (!hasNotice(theirs) || hasActiveSwap(theirs)) {
+            boolean theirsTrading = tradeRepository.findByRequesterSchedule_IdInOrTargetSchedule_IdIn(List.of(theirs.getId()), List.of(theirs.getId()))
+                    .stream().anyMatch(ShiftTrade::isOpen);
+            if (!hasNotice(theirs) || hasActiveSwap(theirs) || theirsTrading) {
                 throw new IllegalArgumentException("이 근무는 지금 바꿀 수 없습니다.");
             }
             requireNoBlocker(exchangeBlocker(storeId, mine, theirs));
@@ -239,6 +241,16 @@ public class ShiftTradeService {
         }
         if (!hasNotice(trade.getRequesterSchedule())) {
             return Optional.of("근무 48시간 전이 지나 바꿀 수 없습니다");
+        }
+        // 요청 뒤에 대타 확정 등으로 담당자가 바뀌었으면 처음 합의한 교환이 아니다
+        if (!trade.getRequesterSchedule().getEmployee().getId().equals(trade.getRequester().getId())
+                || (trade.getType() == TradeType.EXCHANGE
+                && !trade.getTargetSchedule().getEmployee().getId().equals(trade.getTarget().getId()))) {
+            return Optional.of("요청 이후 근무 담당자가 바뀌었습니다");
+        }
+        if (hasActiveSwap(trade.getRequesterSchedule())
+                || (trade.getType() == TradeType.EXCHANGE && hasActiveSwap(trade.getTargetSchedule()))) {
+            return Optional.of("결원 요청이 진행 중인 근무입니다");
         }
         Long storeId = trade.getStore().getId();
         return trade.getType() == TradeType.HANDOVER

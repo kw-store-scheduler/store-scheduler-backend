@@ -59,7 +59,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Transactional
 class ScheduleGenerationTest {
 
-    private static final LocalDate WEEK_START = LocalDate.of(2026, 11, 2); // 월요일
+    private static final LocalDate WEEK_START = LocalDate.now().plusWeeks(2).with(DayOfWeek.MONDAY);
 
     @Autowired MockMvc mockMvc;
     @Autowired JwtTokenProvider jwtTokenProvider;
@@ -378,6 +378,30 @@ class ScheduleGenerationTest {
                         .header("Authorization", otherToken)
                         .contentType("application/json").content("{\"candidateIndex\":0}"))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void 지난_기간은_생성할_수_없고_진행_중인_기간을_확정해도_지난_근무는_남는다() throws Exception {
+        LocalDate lastWeek = LocalDate.now().minusWeeks(1).with(DayOfWeek.MONDAY);
+        automate(lastWeek).andExpect(status().isBadRequest());
+
+        LocalDate yesterday = LocalDate.now().minusDays(1);
+        Schedule worked = new Schedule();
+        worked.setStore(store);
+        worked.setEmployee(midweekStaff);
+        worked.setWorkDate(yesterday);
+        worked.setStartTime(LocalTime.of(9, 0));
+        worked.setEndTime(LocalTime.of(13, 0));
+        scheduleRepository.save(worked);
+
+        String body = mockMvc.perform(post("/api/stores/{storeId}/schedules/automate", store.getId())
+                        .param("weekStart", yesterday.with(DayOfWeek.MONDAY).toString()).param("weeks", "2")
+                        .header("Authorization", "Bearer " + jwtTokenProvider.createToken("owner", "MANAGER")))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        confirm(objectMapper.readTree(body).get("proposalId").asLong(), 0).andExpect(status().isOk());
+
+        assertThat(scheduleRepository.findById(worked.getId())).isPresent();
+        assertThat(scheduleRepository.findByStoreIdAndWorkDateBetween(store.getId(), yesterday.with(DayOfWeek.MONDAY), yesterday)).hasSize(1);
     }
 
     private long createProposal(LocalDate weekStart) throws Exception {

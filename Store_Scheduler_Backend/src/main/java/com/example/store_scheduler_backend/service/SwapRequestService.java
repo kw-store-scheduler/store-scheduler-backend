@@ -5,12 +5,14 @@ import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.EmployeeStatus;
 import com.example.store_scheduler_backend.domain.OfferStatus;
 import com.example.store_scheduler_backend.domain.Schedule;
+import com.example.store_scheduler_backend.domain.ShiftTrade;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.domain.SwapOffer;
 import com.example.store_scheduler_backend.domain.SwapRequest;
 import com.example.store_scheduler_backend.domain.SwapStatus;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
 import com.example.store_scheduler_backend.repository.ScheduleRepository;
+import com.example.store_scheduler_backend.repository.ShiftTradeRepository;
 import com.example.store_scheduler_backend.repository.SwapOfferRepository;
 import com.example.store_scheduler_backend.repository.SwapRequestRepository;
 import lombok.RequiredArgsConstructor;
@@ -49,6 +51,7 @@ public class SwapRequestService {
     private final FcmService fcmService;
     private final OpenShiftService openShiftService;
     private final SwapAssignment swapAssignment;
+    private final ShiftTradeRepository tradeRepository;
 
     // 사장님 화면의 후보별 연락 상태. 대타 요청 상태(SENT 등)가 게시판 지원 상태보다 우선
     public record Contact(String status, LocalDateTime sentAt) {
@@ -87,6 +90,11 @@ public class SwapRequestService {
                 .anyMatch(SwapRequest::isActive);
         if (alreadyRequested) {
             throw new IllegalArgumentException("이미 결원 요청이 진행 중인 근무입니다.");
+        }
+        boolean trading = tradeRepository.findByRequesterSchedule_IdInOrTargetSchedule_IdIn(List.of(scheduleId), List.of(scheduleId))
+                .stream().anyMatch(ShiftTrade::isOpen);
+        if (trading) {
+            throw new IllegalArgumentException("근무 바꾸기 요청이 진행 중인 근무입니다. 먼저 요청을 취소해주세요.");
         }
 
         SwapRequest saved = swapRequestRepository.save(new SwapRequest(schedule, reason, category, partialFrom));

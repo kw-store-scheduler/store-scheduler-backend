@@ -215,6 +215,9 @@ public class ScheduleAutomationService {
 
     private ScheduleProposalResponse generate(Long storeId, LocalDate start, int numDays, String managerUsername) {
         Store store = storeAccessGuard.verifyOwner(storeId, managerUsername);
+        if (start.plusDays(numDays - 1).isBefore(LocalDate.now())) {
+            throw new IllegalArgumentException("이미 지난 기간의 근무표는 만들 수 없습니다.");
+        }
         List<Employee> employees = employeeRepository.findByStoreIdAndStatus(storeId, EmployeeStatus.APPROVED);
         List<Shift> shifts = shiftRepository.findByStoreId(storeId).stream()
                 .sorted(Comparator.comparing(Shift::getStartTime).thenComparing(Shift::getId))
