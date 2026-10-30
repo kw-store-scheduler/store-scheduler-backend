@@ -47,7 +47,7 @@ public class PayrollService {
         for (Employee employee : employees) {
             EmployeePayroll payroll = calculateForEmployee(employee, start, end);
             // 퇴사한 직원은 그달 근무가 있을 때만 정산 대상
-            if (employee.getStatus() == EmployeeStatus.APPROVED || payroll.getTotalHours() > 0) {
+            if (employee.getStatus() == EmployeeStatus.APPROVED || payroll.getTotalPay() > 0) {
                 result.add(payroll);
             }
         }
@@ -60,8 +60,10 @@ public class PayrollService {
     }
 
     EmployeePayroll calculateForEmployee(Employee employee, LocalDate start, LocalDate end) {
-        List<Schedule> schedules = scheduleRepository.findByEmployeeIdAndWorkDateBetweenOrderByWorkDateAsc(
-                employee.getId(), start, end);
+        // 월을 걸친 주도 주 전체 시간으로 판단해야 하므로 앞뒤 주까지 읽는다
+        List<Schedule> schedules = scheduleRepository.findByEmployeeIdAndWorkDateBetweenOrderByWorkDateAsc(employee.getId(),
+                start.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY)),
+                end.with(TemporalAdjusters.nextOrSame(DayOfWeek.SUNDAY)));
 
         long totalMinutes = 0;
         long nightMinutes = 0;
@@ -71,18 +73,24 @@ public class PayrollService {
             if (minutes < 0) {
                 minutes += 24 * 60;
             }
-            totalMinutes += minutes;
-            nightMinutes += nightMinutes(schedule.getStartTime(), minutes);
-
             LocalDate weekStart = schedule.getWorkDate().with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
             weeklyMinutes.merge(weekStart, minutes, Long::sum);
+            if (!schedule.getWorkDate().isBefore(start) && !schedule.getWorkDate().isAfter(end)) {
+                totalMinutes += minutes;
+                nightMinutes += nightMinutes(schedule.getStartTime(), minutes);
+            }
         }
+        // 주휴수당과 연장 가산은 그 주가 끝나는 날(일요일)이 속한 기간에 넣어 두 달에 중복되지 않게 한다
+        List<Long> settledWeeks = weeklyMinutes.entrySet().stream()
+                .filter(w -> !w.getKey().plusDays(6).isBefore(start) && !w.getKey().plusDays(6).isAfter(end))
+                .map(Map.Entry::getValue)
+                .toList();
 
         int hourlyWage = employee.getHourlyWage() != null ? employee.getHourlyWage() : 0;
         long regularWage = Math.round(totalMinutes / 60.0 * hourlyWage);
 
         long weeklyHolidayMinutes = 0;
-        for (long minutes : weeklyMinutes.values()) {
+        for (long minutes : settledWeeks) {
             if (minutes >= WEEKLY_HOLIDAY_THRESHOLD_MINUTES) {
                 weeklyHolidayMinutes += Math.min(minutes / 5, MAX_WEEKLY_HOLIDAY_MINUTES);
             }
@@ -94,7 +102,7 @@ public class PayrollService {
         long overtimePay = 0;
         if (laborPolicy.premiumApplies(employee.getStore())) {
             nightPay = Math.round(nightMinutes / 60.0 * hourlyWage * LaborPolicy.PREMIUM_RATE);
-            long overtimeMinutes = weeklyMinutes.values().stream()
+            long overtimeMinutes = settledWeeks.stream()
                     .mapToLong(m -> Math.max(0, m - LaborPolicy.WEEKLY_REGULAR_MINUTES))
                     .sum();
             overtimePay = Math.round(overtimeMinutes / 60.0 * hourlyWage * LaborPolicy.PREMIUM_RATE);
