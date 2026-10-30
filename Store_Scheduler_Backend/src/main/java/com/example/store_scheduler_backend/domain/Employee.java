@@ -58,6 +58,13 @@ public class Employee {
 
     private Integer hourlyWage;
 
+    // 수습 시급. 최저임금 감액 요건을 확인한 뒤 점주가 정하고, 수습 시작 3개월까지만 적용된다
+    private Integer probationWage;
+
+    // 예상 실수령액 계산용. null은 공제 없음
+    @Enumerated(EnumType.STRING)
+    private PayDeduction deduction;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private EmployeeStatus status = EmployeeStatus.PENDING;
@@ -102,6 +109,20 @@ public class Employee {
 
     public boolean isMinor() {
         return Boolean.TRUE.equals(minor);
+    }
+
+    public void updatePaySettings(PayDeduction deduction, Integer probationWage) {
+        this.deduction = deduction;
+        this.probationWage = probationWage;
+    }
+
+    public PayDeduction getDeduction() {
+        return deduction != null ? deduction : PayDeduction.NONE;
+    }
+
+    public boolean isProbationWageOn(LocalDate date) {
+        return probationWage != null && startDate != null && probationUntil != null
+                && !date.isBefore(startDate) && !date.isAfter(probationUntil) && !date.isAfter(startDate.plusMonths(3));
     }
 
     public void updatePosition(StaffPosition position) {

@@ -3,6 +3,7 @@ package com.example.store_scheduler_backend.service;
 import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.EmploymentType;
 import com.example.store_scheduler_backend.domain.EmployeeStatus;
+import com.example.store_scheduler_backend.domain.PayDeduction;
 import com.example.store_scheduler_backend.domain.Schedule;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.domain.User;
@@ -203,6 +204,32 @@ public class EmployeeService {
         if (employmentType != null && employmentType != beforeType) {
             profileService.recordChange(employee, "고용 형태 " + (employmentType == EmploymentType.FULL_TIME ? "직원" : "알바") + "(으)로 변경");
         }
+    }
+
+    // 수습 감액은 1년 이상 계약, 단순노무 아님, 근무 시작일과 수습 기간이 있을 때만, 최저임금의 90% 이상으로 정할 수 있다
+    @Transactional
+    public Employee updatePaySettings(Long storeId, Long employeeId, PayDeduction deduction, Integer probationWage,
+                                      boolean contractOneYearOrMore, boolean simpleLabor, String managerUsername) {
+        storeAccessGuard.verifyOwner(storeId, managerUsername);
+        Employee employee = findOne(employeeId);
+        if (!employee.getStore().getId().equals(storeId)) {
+            throw new IllegalArgumentException("해당 매장 소속 직원이 아닙니다.");
+        }
+        if (probationWage != null) {
+            if (!contractOneYearOrMore || simpleLabor) {
+                throw new IllegalArgumentException("수습 감액은 1년 이상 근로계약이고 단순노무 직종이 아닐 때만 적용할 수 있습니다.");
+            }
+            if (employee.getStartDate() == null || employee.getProbationUntil() == null) {
+                throw new IllegalArgumentException("근무 시작일과 수습 기간을 먼저 입력해주세요.");
+            }
+            int floor = LaborPolicy.probationWageFloor(LocalDate.now().getYear());
+            if (probationWage < floor) {
+                throw new IllegalArgumentException("수습 시급은 최저임금의 90%인 " + floor + "원 이상이어야 합니다.");
+            }
+        }
+        employee.updatePaySettings(deduction, probationWage);
+        profileService.recordChange(employee, "급여 설정 변경");
+        return employee;
     }
 
     private void recordWageChange(Employee employee, int newWage) {
