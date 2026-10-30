@@ -12,8 +12,10 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.transaction.annotation.Transactional;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.options;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -85,5 +87,23 @@ class ApiAccessConfigTest {
                         .header("Origin", "http://evil.example")
                         .header("Access-Control-Request-Method", "PATCH"))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void 요청을_잘못_보내면_500이_아니라_400_404_405로_답한다() throws Exception {
+        userRepository.save(new User("staff", "pw", Role.EMPLOYEE));
+        String token = "Bearer " + jwtTokenProvider.createToken("staff", "EMPLOYEE");
+        mockMvc.perform(get("/api/holidays").header("Authorization", token))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(containsString("year")));
+        mockMvc.perform(get("/api/holidays").param("year", "올해").header("Authorization", token))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.message").value(containsString("year")));
+        mockMvc.perform(post("/api/auth/login").contentType("application/json").content("{\"username\":"))
+                .andExpect(status().isBadRequest());
+        mockMvc.perform(get("/api/no-such-path").header("Authorization", token))
+                .andExpect(status().isNotFound());
+        mockMvc.perform(delete("/api/holidays").header("Authorization", token))
+                .andExpect(status().isMethodNotAllowed());
     }
 }
