@@ -51,6 +51,7 @@ public class OpenShiftService {
     private final SkillRepository skillRepository;
     private final SwapRequestRepository swapRequestRepository;
     private final LaborPolicy laborPolicy;
+    private final RowLock rowLock;
 
     // eligible·blocker·expectedPay·myStatus는 직원이 볼 때만 채운다
     public record BoardItem(OpenShift openShift, int applicantCount, Boolean eligible, String blocker, Long expectedPay,
@@ -269,7 +270,14 @@ public class OpenShiftService {
     @Transactional
     public ShiftApplication approve(Long storeId, Long openShiftId, Long applicationId, String managerUsername) {
         storeAccessGuard.verifyOwner(storeId, managerUsername);
-        OpenShift openShift = findOpen(storeId, openShiftId);
+        OpenShift openShift = findInStore(storeId, openShiftId);
+        rowLock.lock(openShift);
+        if (!openShift.isOpen()) {
+            throw new IllegalArgumentException("마감된 근무입니다.");
+        }
+        if (openShift.getSwapRequest() != null) {
+            rowLock.lock(openShift.getSwapRequest());
+        }
         ShiftApplication application = applicationRepository.findById(applicationId)
                 .filter(a -> a.getOpenShift().getId().equals(openShiftId) && a.getStatus() == ApplicationStatus.APPLIED)
                 .orElseThrow(() -> new IllegalArgumentException("승인할 수 있는 지원이 아닙니다."));

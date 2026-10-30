@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
@@ -23,6 +24,8 @@ import java.util.stream.Collectors;
 @Transactional(readOnly = true)
 @RequiredArgsConstructor
 public class AttendanceService {
+
+    private static final Duration MAX_OPEN = Duration.ofHours(24);
 
     private final AttendanceRepository attendanceRepository;
     private final ScheduleRepository scheduleRepository;
@@ -51,7 +54,25 @@ public class AttendanceService {
         Employee employee = storeAccessGuard.verifyApprovedEmployee(storeId, username);
         Attendance attendance = attendanceRepository.findFirstByEmployeeIdAndClockOutIsNullOrderByClockInDesc(employee.getId())
                 .orElseThrow(() -> new IllegalArgumentException("퇴근할 출근 기록이 없습니다."));
+        // 오래된 기록을 닫으면 며칠짜리 근무가 되므로, 퇴근을 빠뜨린 기록은 점주가 고치게 한다
+        if (attendance.getClockIn().isBefore(LocalDateTime.now().minus(MAX_OPEN))) {
+            throw new IllegalArgumentException("퇴근을 찍지 않은 " + attendance.getWorkDate() + " 출근 기록이 있습니다. 사장님께 수정을 요청해주세요.");
+        }
         attendance.clockOut(LocalDateTime.now());
+        return toView(attendance);
+    }
+
+    // 점주: 퇴근 누락·잘못 찍은 기록 수정
+    @Transactional
+    public AttendanceView correct(Long storeId, Long attendanceId, LocalDateTime clockIn, LocalDateTime clockOut, String managerUsername) {
+        storeAccessGuard.verifyOwner(storeId, managerUsername);
+        Attendance attendance = attendanceRepository.findById(attendanceId)
+                .filter(a -> a.getStore().getId().equals(storeId))
+                .orElseThrow(() -> new IllegalArgumentException("존재하지 않는 출퇴근 기록입니다."));
+        if (clockOut != null && !clockOut.isAfter(clockIn)) {
+            throw new IllegalArgumentException("퇴근 시각은 출근 시각보다 늦어야 합니다.");
+        }
+        attendance.correct(clockIn, clockOut);
         return toView(attendance);
     }
 

@@ -15,6 +15,7 @@ import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.YearMonth;
+import java.time.temporal.ChronoUnit;
 import java.time.temporal.TemporalAdjusters;
 
 // 매장 근무표 주기: 다음 기간, 자동 생성 시각, 희망 제출 마감
@@ -26,6 +27,7 @@ public class SchedulePlanService {
 
     // 자동 생성일 며칠 전까지 희망을 받는지
     public static final int DEADLINE_DAYS_BEFORE_GENERATION = 3;
+    private static final LocalDate BIWEEKLY_ANCHOR = LocalDate.of(2024, 1, 1);
 
     private final StoreRepository storeRepository;
     private final ScheduleProposalRepository proposalRepository;
@@ -59,9 +61,13 @@ public class SchedulePlanService {
     }
 
     static LocalDate nextPeriodStart(ScheduleCycle cycle, LocalDate today) {
-        return cycle == ScheduleCycle.MONTHLY
-                ? YearMonth.from(today).plusMonths(1).atDay(1)
-                : today.with(TemporalAdjusters.next(DayOfWeek.MONDAY));
+        if (cycle == ScheduleCycle.MONTHLY) {
+            return YearMonth.from(today).plusMonths(1).atDay(1);
+        }
+        LocalDate monday = today.with(TemporalAdjusters.next(DayOfWeek.MONDAY));
+        // 2주 주기는 기준 월요일부터 짝수 주에만 시작해야 기간이 겹치지 않는다
+        boolean offWeek = cycle == ScheduleCycle.BIWEEKLY && ChronoUnit.WEEKS.between(BIWEEKLY_ANCHOR, monday) % 2 != 0;
+        return offWeek ? monday.plusWeeks(1) : monday;
     }
 
     // 자동 생성 시각이 지났고 그 기간 후보안이 아직 없으면 만든다. 만든 매장 수를 돌려준다
