@@ -99,6 +99,9 @@ public class ScheduleAutomationService {
     private static final int PROMISE_POINT_WEIGHT = 1_000;
     private static final int MINOR_MAX_SHIFT_MINUTES = 7 * 60;
     private static final int MAX_WEEKLY_HOURS = 52;
+    static final int MINOR_MAX_WEEKLY_HOURS = 35;
+    // 기간 앞뒤로 읽어 둘 일수. 매장 연속 근무 한도의 최댓값 이상
+    private static final int BOUNDARY_DAYS = 7;
     private static final int MAX_WARNINGS = 30;
     // 우선순위 1~5위의 패널티 배율. 순위에 없는 항목은 1배
     private static final double[] PRIORITY_SCALES = {2.0, 1.6, 1.3, 1.1, 1.0};
@@ -130,7 +133,8 @@ public class ScheduleAutomationService {
                                StaffingPlanService.Plan staffing,
                                Map<Long, List<EmployeeSkillLevel>> levelsByEmployee,
                                List<SkillWindowRequirement> windows,
-                               Map<Long, List<UnavailablePeriod>> periodsByEmployee) {
+                               Map<Long, List<UnavailablePeriod>> periodsByEmployee,
+                               List<Schedule> outside) {
         LocalDate end() {
             return start.plusDays(numDays - 1);
         }
@@ -302,7 +306,55 @@ public class ScheduleAutomationService {
                         .collect(Collectors.groupingBy(l -> l.getEmployee().getId())),
                 windowRepository.findByStoreIdOrderByStartTimeAsc(storeId),
                 periodRepository.findByEmployee_StoreIdAndEndDateGreaterThanEqualAndStartDateLessThanEqual(storeId, start, end)
-                        .stream().collect(Collectors.groupingBy(p -> p.getEmployee().getId())));
+                        .stream().collect(Collectors.groupingBy(p -> p.getEmployee().getId())),
+                outsideSchedules(storeId, start, end));
+    }
+
+    private List<Schedule> outsideSchedules(Long storeId, LocalDate start, LocalDate end) {
+        List<Schedule> outside = new ArrayList<>(scheduleRepository.findByStoreIdAndWorkDateBetween(
+                storeId, start.minusDays(BOUNDARY_DAYS), start.minusDays(1)));
+        outside.addAll(scheduleRepository.findByStoreIdAndWorkDateBetween(storeId, end.plusDays(1), end.plusDays(BOUNDARY_DAYS)));
+        return outside;
+    }
+
+    // 앞뒤 기간에 확정된 근무와 이어져도 연속 근무·주 최대 시간을 지키도록 엔진에 알린다
+    private void addBoundaryHistory(Map<String, Object> config, Employee employee, PeriodInput input) {
+        List<Schedule> own = input.outside().stream()
+                .filter(s -> s.getEmployee().getId().equals(employee.getId()))
+                .toList();
+        if (own.isEmpty()) {
+            return;
+        }
+        Set<LocalDate> workDays = own.stream().map(Schedule::getWorkDate).collect(Collectors.toSet());
+        int prior = 0;
+        while (workDays.contains(input.start().minusDays(prior + 1))) {
+            prior++;
+        }
+        int next = 0;
+        while (workDays.contains(input.end().plusDays(next + 1))) {
+            next++;
+        }
+        if (prior > 0) {
+            config.put("prior_run_days", prior);
+        }
+        if (next > 0) {
+            config.put("next_run_days", next);
+        }
+        Map<String, Integer> weekPrior = new HashMap<>();
+        List<List<Integer>> weeks = calendarWeeks(input);
+        for (int w = 0; w < weeks.size(); w++) {
+            LocalDate monday = input.dateOf(weeks.get(w).get(0)).with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
+            int hours = own.stream()
+                    .filter(s -> !s.getWorkDate().isBefore(monday) && !s.getWorkDate().isAfter(monday.plusDays(6)))
+                    .mapToInt(s -> shiftHours(s.getStartTime(), s.getEndTime()))
+                    .sum();
+            if (hours > 0) {
+                weekPrior.put(String.valueOf(w), hours);
+            }
+        }
+        if (!weekPrior.isEmpty()) {
+            config.put("week_prior_hours", weekPrior);
+        }
     }
 
     // 기준마다 대표 해 하나만 쓰므로 동점 대안 탐색(max_alt_solutions)은 하지 않는다
@@ -367,9 +419,14 @@ public class ScheduleAutomationService {
                     .filter(f -> f.getCategory() == FixedScheduleCategory.OTHER_JOB && activeDuring(f, input))
                     .mapToLong(FixedSchedule::weeklyMinutes)
                     .sum();
-            if (otherJobMinutes > 0) {
-                config.put("max_weekly_hours", Math.max(0, MAX_WEEKLY_HOURS - (int) Math.ceil(otherJobMinutes / 60.0)));
+            int weeklyCap = Math.max(0, MAX_WEEKLY_HOURS - (int) Math.ceil(otherJobMinutes / 60.0));
+            if (employee.isMinor()) {
+                weeklyCap = Math.min(weeklyCap, MINOR_MAX_WEEKLY_HOURS);
             }
+            if (weeklyCap < MAX_WEEKLY_HOURS) {
+                config.put("max_weekly_hours", weeklyCap);
+            }
+            addBoundaryHistory(config, employee, input);
             config.put("available_days", new ArrayList<>(availableDays));
             config.put("unavailable_slots", new ArrayList<>(unavailable));
             config.put("skills", skillKeys(employee, input.levelsByEmployee().getOrDefault(employee.getId(), List.of())));

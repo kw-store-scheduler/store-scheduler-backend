@@ -322,6 +322,9 @@ public class SubstituteFinder {
         if (workDays.contains(date)) {
             return Optional.of("같은 날 다른 근무가 있음");
         }
+        if (employee.isMinor() && weeklyHoursWithShift > ScheduleAutomationService.MINOR_MAX_WEEKLY_HOURS) {
+            return Optional.of("미성년자 주 " + ScheduleAutomationService.MINOR_MAX_WEEKLY_HOURS + "시간 초과");
+        }
         if (weeklyHoursWithShift > MAX_WEEKLY_HOURS) {
             return Optional.of("주 52시간 초과");
         }
