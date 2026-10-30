@@ -41,6 +41,7 @@ class PeriodBoundaryConfigTest {
     @Autowired ScheduleRepository scheduleRepository;
     @Autowired AvailabilityRepository availabilityRepository;
     @Autowired ScheduleAutomationService automationService;
+    @Autowired ShiftPreferenceRepository preferenceRepository;
     @Autowired SubstituteFinder substituteFinder;
     @MockitoBean ScheduleEngine engine;
 
@@ -105,6 +106,25 @@ class PeriodBoundaryConfigTest {
                 .filteredOn(c -> c.employee().getId().equals(minor.getId()))
                 .singleElement()
                 .satisfies(c -> assertThat(c.reasons().get(0)).contains("35시간"));
+    }
+
+    @Test
+    @SuppressWarnings("unchecked")
+    void 월을_걸친_주에서_희망을_내지_않은_달의_날짜는_가용_시간으로_판단한다() {
+        LocalDate monday = YearMonth.from(MONDAY).plusMonths(1).atEndOfMonth().with(DayOfWeek.MONDAY);
+        while (YearMonth.from(monday).equals(YearMonth.from(monday.plusDays(6)))) {
+            monday = YearMonth.from(monday).plusMonths(1).atEndOfMonth().with(DayOfWeek.MONDAY);
+        }
+        LocalDate nextMonthFirst = YearMonth.from(monday).plusMonths(1).atDay(1);
+        Shift shift = shiftRepository.findByStoreId(store.getId()).get(0);
+        preferenceRepository.save(new ShiftPreference(employee, nextMonthFirst, shift, PreferenceLevel.AVAILABLE));
+
+        automationService.generateProposal(store.getId(), monday, "owner");
+
+        List<Integer> available = (List<Integer>) employeeConfig(employee).get("available_days");
+        assertThat(available).contains(0, (int) java.time.temporal.ChronoUnit.DAYS.between(monday, nextMonthFirst));
+        assertThat(available).doesNotContain((int) java.time.temporal.ChronoUnit.DAYS.between(monday, nextMonthFirst) + 1 > 6 ? -1
+                : (int) java.time.temporal.ChronoUnit.DAYS.between(monday, nextMonthFirst) + 1);
     }
 
     private Map<String, Object> generateWeek(Employee target) {
