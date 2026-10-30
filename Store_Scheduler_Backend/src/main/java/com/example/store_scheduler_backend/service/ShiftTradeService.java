@@ -165,6 +165,7 @@ public class ShiftTradeService {
         }
         trade.resolve(TradeStatus.REJECTED);
         fcmService.send(trade.getRequester().getUser(), "근무 변경 반려", "사장님이 근무 변경을 반려했어요.");
+        fcmService.send(trade.getTarget().getUser(), "근무 변경 반려", "사장님이 근무 변경을 반려했어요.");
         return trade;
     }
 
@@ -177,6 +178,7 @@ public class ShiftTradeService {
             throw new IllegalArgumentException("진행 중인 본인 요청만 취소할 수 있습니다.");
         }
         trade.resolve(TradeStatus.CANCELLED);
+        fcmService.send(trade.getTarget().getUser(), "요청 취소", me.getDisplayName() + "님이 근무 바꾸기 요청을 취소했어요.");
         return trade;
     }
 
