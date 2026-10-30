@@ -41,6 +41,10 @@ public class ScheduleService {
         return scheduleRepository.findByStoreIdOrderByWorkDateAscStartTimeAsc(storeId);
     }
 
+    public boolean isOwner(Long storeId, String username) {
+        return storeAccessGuard.getStore(storeId).getOwner().getUsername().equals(username);
+    }
+
     public List<Schedule> findMySchedules(Long storeId, String username) {
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new IllegalArgumentException("사용자를 찾을 수 없습니다."));

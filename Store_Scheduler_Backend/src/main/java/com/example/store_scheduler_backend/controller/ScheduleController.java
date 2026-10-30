@@ -95,8 +95,11 @@ public class ScheduleController {
     public ResponseEntity<List<ScheduleResponseDto>> getSchedules(
             @PathVariable Long storeId,
             @AuthenticationPrincipal UserDetails userDetails) {
-        List<ScheduleResponseDto> result = scheduleService.findByStore(storeId, userDetails.getUsername()).stream()
-                .map(ScheduleResponseDto::new)
+        String username = userDetails.getUsername();
+        boolean owner = scheduleService.isOwner(storeId, username);
+        List<ScheduleResponseDto> result = scheduleService.findByStore(storeId, username).stream()
+                .map(s -> owner || s.getEmployee().getUser().getUsername().equals(username)
+                        ? new ScheduleResponseDto(s) : ScheduleResponseDto.withoutReasons(s))
                 .collect(Collectors.toList());
         return ResponseEntity.ok(result);
     }

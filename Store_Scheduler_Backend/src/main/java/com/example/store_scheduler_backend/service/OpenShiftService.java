@@ -255,9 +255,8 @@ public class OpenShiftService {
         if (openShift.isPastDeadline(LocalDateTime.now())) {
             return Optional.of("지원 마감");
         }
-        Skill required = openShift.getRequiredSkill();
-        if (required != null && employee.getSkills().stream().noneMatch(sk -> sk.getId().equals(required.getId()))) {
-            return Optional.of("필요 역량(" + required.getName() + ") 없음");
+        if (!hasRequiredSkill(openShift, employee)) {
+            return Optional.of("필요 역량(" + openShift.getRequiredSkill().getName() + ") 없음");
         }
         Optional<SubstituteFinder.Candidate> candidate = candidateOf(openShift, employee);
         if (candidate.isEmpty()) {
@@ -283,7 +282,8 @@ public class OpenShiftService {
                 .orElseThrow(() -> new IllegalArgumentException("승인할 수 있는 지원이 아닙니다."));
         Employee applicant = application.getEmployee();
         // 지원 이후 다른 근무가 잡혔을 수 있으므로 승인 시점에 다시 확인
-        if (!candidateOf(openShift, applicant).map(SubstituteFinder.Candidate::eligible).orElse(false)) {
+        if (!hasRequiredSkill(openShift, applicant)
+                || !candidateOf(openShift, applicant).map(SubstituteFinder.Candidate::eligible).orElse(false)) {
             throw new IllegalArgumentException("현재 근무 상황으로는 이 지원자를 배정할 수 없습니다.");
         }
 
@@ -331,6 +331,7 @@ public class OpenShiftService {
         List<SubstituteFinder.Candidate> eligible = substituteFinder.find(openShift.getStore().getId(), openShift.getWorkDate(),
                         openShift.getStartTime(), openShift.getEndTime(), excluded).stream()
                 .filter(SubstituteFinder.Candidate::eligible)
+                .filter(c -> hasRequiredSkill(openShift, c.employee()))
                 .toList();
         String title = openShift.getKind() == OpenShiftKind.VACANCY ? "대타 구해요" : "추가 근무 모집";
         for (SubstituteFinder.Candidate c : eligible) {
@@ -346,6 +347,11 @@ public class OpenShiftService {
                         openShift.getEndTime(), excluded).stream()
                 .filter(c -> c.employee().getId().equals(employee.getId()))
                 .findFirst();
+    }
+
+    private static boolean hasRequiredSkill(OpenShift openShift, Employee employee) {
+        Skill required = openShift.getRequiredSkill();
+        return required == null || employee.getSkills().stream().anyMatch(sk -> sk.getId().equals(required.getId()));
     }
 
     private void rejectRemaining(OpenShift openShift) {

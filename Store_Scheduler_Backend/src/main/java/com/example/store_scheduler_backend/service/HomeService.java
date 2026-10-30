@@ -38,8 +38,6 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class HomeService {
 
-    private static final double NIGHT_BONUS_RATE = 0.5;
-
     private final StoreAccessGuard storeAccessGuard;
     private final EmployeeRepository employeeRepository;
     private final ScheduleRepository scheduleRepository;
@@ -51,6 +49,8 @@ public class HomeService {
     private final PreferenceSubmissionRepository submissionRepository;
     private final LeaveService leaveService;
     private final NoticeService noticeService;
+    private final LaborPolicy laborPolicy;
+    private final StaffingPlanService staffingPlanService;
 
     // 다음 달 희망 제출 현황. 점주 홈은 제출 인원, 알바 홈은 본인 제출 여부
     public record PreferenceStatus(YearMonth month, LocalDate deadline, long submittedCount, long employeeCount,
@@ -83,19 +83,27 @@ public class HomeService {
         LocalDate weekStart = date.with(TemporalAdjusters.previousOrSame(DayOfWeek.MONDAY));
         List<Shift> shifts = sortedShifts(storeId);
 
+        boolean premium = laborPolicy.premiumApplies(store);
         long weeklyLaborCost = scheduleRepository.findByStoreIdAndWorkDateBetween(storeId, weekStart, weekStart.plusDays(6))
                 .stream()
-                .mapToLong(this::laborCost)
+                .mapToLong(s -> laborCost(s, premium))
                 .sum();
+        StaffingPlanService.Plan plan = staffingPlanService.planFor(storeId, date, date);
         List<Schedule> today = scheduleRepository.findByStoreIdAndWorkDateBetween(storeId, date, date);
         List<ShiftStatus> todayShifts = shifts.stream()
-                .filter(s -> s.getDayOfWeek() == null || s.getDayOfWeek() == date.getDayOfWeek())
-                .map(s -> new ShiftStatus(s.getName(), s.getStartTime(), s.getEndTime(), s.getRequiredStaff(),
-                        today.stream()
-                                .filter(sc -> sc.getStartTime().equals(s.getStartTime()) && sc.getEndTime().equals(s.getEndTime()))
-                                .map(sc -> sc.getEmployee().getDisplayName())
-                                .sorted()
-                                .toList()))
+                .filter(s -> plan.of(s, date).target() > 0)
+                .map(s -> {
+                    // 예외일에 교대 시간을 바꿨으면 근무도 바뀐 시간으로 저장돼 있다
+                    LocalTime[] override = plan.timeOverride(s, date);
+                    LocalTime start = override != null ? override[0] : s.getStartTime();
+                    LocalTime end = override != null ? override[1] : s.getEndTime();
+                    return new ShiftStatus(s.getName(), start, end, plan.of(s, date).target(),
+                            today.stream()
+                                    .filter(sc -> sc.getStartTime().equals(start) && sc.getEndTime().equals(end))
+                                    .map(sc -> sc.getEmployee().getDisplayName())
+                                    .sorted()
+                                    .toList());
+                })
                 .toList();
         List<SwapRequest> activeVacancies = swapRequestRepository.findByStoreIdOrderByCreatedAtDesc(storeId).stream()
                 .filter(SwapRequest::isActive)
@@ -157,17 +165,15 @@ public class HomeService {
                 me != null && submitted.contains(me.getId()));
     }
 
-    // 확정 근무표의 예상 인건비. 후보안 비교와 같은 기준으로 야간 교대는 50% 가산
-    private long laborCost(Schedule schedule) {
+    // 확정 근무표의 예상 인건비. 급여 계산과 같이 상시 5인 이상이면 22~06시 시간만 50% 가산
+    private long laborCost(Schedule schedule, boolean premium) {
         int wage = schedule.getEmployee().getHourlyWage() != null ? schedule.getEmployee().getHourlyWage() : 0;
         long minutes = Duration.between(schedule.getStartTime(), schedule.getEndTime()).toMinutes();
         if (minutes <= 0) {
             minutes += 24 * 60;
         }
-        long base = Math.round(minutes / 60.0 * wage);
-        return ScheduleAutomationService.isNightShift(schedule.getStartTime(), schedule.getEndTime())
-                ? Math.round(base * (1 + NIGHT_BONUS_RATE))
-                : base;
+        long night = premium ? PayrollService.nightMinutes(schedule.getStartTime(), minutes) : 0;
+        return Math.round(minutes / 60.0 * wage + night / 60.0 * wage * LaborPolicy.PREMIUM_RATE);
     }
 
     // 근무표는 교대를 참조하지 않고 시간만 가지고 있어서, 같은 시간대 교대 이름을 찾아 붙인다

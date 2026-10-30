@@ -271,6 +271,11 @@ public class SwapRequestService {
         if (!isEligible(request, employeeId)) {
             throw new IllegalArgumentException("해당 직원은 이 근무를 대신할 수 없습니다. 대타 추천 목록을 확인해주세요.");
         }
+        Employee waiting = request.getSubstitute();
+        if (waiting != null && !waiting.getId().equals(employeeId)) {
+            fcmService.send(waiting.getUser(), "대타 미승인",
+                    request.getWorkDate() + " " + request.getStartTime() + " 대타는 사장님이 다른 직원으로 채웠어요.");
+        }
         swapAssignment.assign(request, employeeRepository.findById(employeeId).orElseThrow());
         openShiftService.closeFor(List.of(requestId), true);
         return request;
@@ -287,6 +292,10 @@ public class SwapRequestService {
         }
         if (!request.getRequester().getId().equals(employee.getId())) {
             throw new AccessDeniedException("본인이 요청한 결원만 취소할 수 있습니다.");
+        }
+        if (request.getSubstitute() != null) {
+            fcmService.send(request.getSubstitute().getUser(), "대타 취소",
+                    request.getWorkDate() + " " + request.getStartTime() + " 결원 요청이 취소되어 대타가 필요 없어졌어요.");
         }
         request.cancel();
         swapAssignment.closePendingOffers(request);

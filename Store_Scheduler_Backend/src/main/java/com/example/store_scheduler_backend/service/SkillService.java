@@ -79,6 +79,8 @@ public class SkillService {
         Employee employee = findEmployee(employeeId, storeId);
         Skill skill = findOne(skillId);
         employee.removeSkill(skill);
+        // 등급 행이 남으면 엔진에는 계속 그 역량이 있는 것으로 넘어간다
+        levelRepository.findByEmployeeIdAndSkillId(employeeId, skillId).ifPresent(levelRepository::delete);
     }
 
     private Skill findOne(Long skillId) {
