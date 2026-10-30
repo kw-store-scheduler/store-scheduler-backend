@@ -1,5 +1,7 @@
 package com.example.store_scheduler_backend.config;
 
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
@@ -16,6 +18,7 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 import java.util.Map;
 import java.util.stream.Collectors;
 
+@Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
@@ -52,6 +55,13 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("message", "접근 권한이 없습니다."));
     }
 
+    // 중복 요청이 동시에 들어오면 사전 확인을 통과한 뒤 DB 제약에 걸린다
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<Map<String, String>> handleDataIntegrity(DataIntegrityViolationException e) {
+        log.warn("DB 제약 위반: {}", e.getMostSpecificCause().getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(Map.of("message", "이미 처리되었거나 저장할 수 없는 요청입니다."));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, String>> handleUnexpected(Exception e) {
         // 없는 주소(404)·지원하지 않는 메서드(405) 같은 스프링 표준 예외는 원래 상태 코드를 유지
@@ -59,6 +69,7 @@ public class GlobalExceptionHandler {
             HttpStatusCode status = errorResponse.getStatusCode();
             return ResponseEntity.status(status).body(Map.of("message", clientErrorMessage(status)));
         }
+        log.error("처리하지 못한 예외", e);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("message", "서버 오류가 발생했습니다."));
     }
 

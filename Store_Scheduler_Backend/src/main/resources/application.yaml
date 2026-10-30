@@ -13,15 +13,9 @@ spring:
   jpa:
     hibernate:
       ddl-auto: update
-    show-sql: true
     properties:
       hibernate:
-        format_sql: true
         dialect: org.hibernate.dialect.PostgreSQLDialect
-
-logging:
-  level:
-    org.hibernate.SQL: debug
 
 cors:
   # 추가로 허용할 웹 프론트 출처 (쉼표 구분, 예: https://app.example.com). localhost는 항상 허용
