@@ -135,9 +135,38 @@ class EmployeeResignationTest {
     }
 
     @Test
-    void 오늘_이후를_마지막_근무일로_정할_수_없다() {
-        assertThatThrownBy(() -> employeeService.resign(store.getId(), leaver.getId(), LocalDate.now().plusDays(1), "owner"))
-                .isInstanceOf(IllegalArgumentException.class);
+    void 미래_날짜면_퇴사_예정으로_두고_그_뒤_근무만_지운_다음_날짜가_지나면_마무리한다() {
+        LocalDate last = LocalDate.now().plusDays(3);
+        Schedule before = schedule(leaver, last);
+        schedule(leaver, last.plusDays(1));
+
+        assertThat(employeeService.resign(store.getId(), leaver.getId(), last, "owner").removedShifts()).isEqualTo(1);
+
+        assertThat(leaver.getStatus()).isEqualTo(EmployeeStatus.APPROVED);
+        assertThat(scheduleRepository.findById(before.getId())).isPresent();
+        assertThat(substituteFinder.find(store.getId(), last.plusDays(1), LocalTime.of(9, 0), LocalTime.of(13, 0), null))
+                .filteredOn(c -> c.employee().getId().equals(leaver.getId()))
+                .singleElement().satisfies(c -> assertThat(c.reasons().get(0)).contains("퇴사 예정"));
+
+        assertThat(employeeService.finishDueResignations(last)).isZero();
+        assertThat(employeeService.finishDueResignations(last.plusDays(1))).isEqualTo(1);
+        assertThat(leaver.getStatus()).isEqualTo(EmployeeStatus.RESIGNED);
+    }
+
+    @Test
+    void 퇴사_예정을_취소하면_계속_근무할_수_있다() {
+        employeeService.resign(store.getId(), leaver.getId(), LocalDate.now().plusDays(3), "owner");
+
+        employeeService.cancelScheduledResignation(store.getId(), leaver.getId(), "owner");
+
+        assertThat(leaver.getResignedOn()).isNull();
+        assertThat(employeeService.finishDueResignations(LocalDate.now().plusDays(10))).isZero();
+    }
+
+    @Test
+    void 노동절과_제헌절은_공휴일이다() {
+        assertThat(com.example.store_scheduler_backend.service.KoreanHolidays.isHoliday(LocalDate.of(2026, 5, 1))).isTrue();
+        assertThat(com.example.store_scheduler_backend.service.KoreanHolidays.isHoliday(LocalDate.of(2026, 7, 17))).isTrue();
     }
 
     @Test

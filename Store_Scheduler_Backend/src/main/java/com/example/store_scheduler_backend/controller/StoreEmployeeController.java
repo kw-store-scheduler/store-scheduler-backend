@@ -74,7 +74,7 @@ public class StoreEmployeeController {
                 .toList());
     }
 
-    @Operation(summary = "퇴사 처리", description = "lastWorkDate를 생략하면 오늘입니다. 지난 근무와 급여 기록은 남고, 이후 근무는 지워지며(removedShifts), 진행 중인 대타·근무 바꾸기·지원은 닫힙니다.")
+    @Operation(summary = "퇴사 처리", description = "lastWorkDate를 생략하면 오늘입니다. 미래 날짜면 퇴사 예정으로 두고 그날까지 앱을 쓸 수 있으며, 날짜가 지나면 자동으로 처리됩니다. 지난 근무와 급여 기록은 남고, 마지막 근무일 뒤의 근무는 지워지며(removedShifts), 그 뒤에 걸린 대타·근무 바꾸기·지원은 닫힙니다.")
     @PostMapping("/api/stores/{storeId}/employees/{employeeId}/resign")
     public ResponseEntity<EmployeeService.Resignation> resign(
             @PathVariable Long storeId,
@@ -83,6 +83,16 @@ public class StoreEmployeeController {
             @AuthenticationPrincipal UserDetails userDetails) {
         return ResponseEntity.ok(employeeService.resign(storeId, employeeId,
                 request != null ? request.getLastWorkDate() : null, userDetails.getUsername()));
+    }
+
+    // 관리자: 퇴사 예정 취소 (지워진 근무는 되돌리지 않는다)
+    @DeleteMapping("/api/stores/{storeId}/employees/{employeeId}/resign")
+    public ResponseEntity<Void> cancelResignation(
+            @PathVariable Long storeId,
+            @PathVariable Long employeeId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        employeeService.cancelScheduledResignation(storeId, employeeId, userDetails.getUsername());
+        return ResponseEntity.noContent().build();
     }
 
     // 관리자: 신청 승인
@@ -170,6 +180,8 @@ public class StoreEmployeeController {
         private String status;
         private EmploymentType employmentType;
         private LocalDate startDate;
+        // 퇴사 예정일 또는 퇴사일
+        private LocalDate resignedOn;
         private boolean minor;
         private LocalDateTime requestedAt;
         private List<String> skills;
@@ -184,6 +196,7 @@ public class StoreEmployeeController {
                     e.getStatus().name(),
                     e.getEmploymentType(),
                     e.getStartDate(),
+                    e.getResignedOn(),
                     e.isMinor(),
                     e.getRequestedAt(),
                     e.getSkills().stream().map(Skill::getName).collect(Collectors.toList())

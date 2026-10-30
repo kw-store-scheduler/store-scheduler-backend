@@ -4,6 +4,7 @@ import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.EmployeeStatus;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
+import java.time.LocalDate;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -20,6 +21,7 @@ public interface EmployeeRepository extends JpaRepository<Employee, Long> {
     List<Employee> findBySkills_Id(Long skillId);
     Optional<Employee> findByStoreIdAndUser_Username(Long storeId, String username);
     List<Employee> findByStatus(EmployeeStatus status);
+    List<Employee> findByStatusAndResignedOnBefore(EmployeeStatus status, LocalDate date);
     long countByStoreIdAndStatus(Long storeId, EmployeeStatus status);
     boolean existsByStoreIdAndUser_UsernameAndStatus(Long storeId, String username, EmployeeStatus status);
 }

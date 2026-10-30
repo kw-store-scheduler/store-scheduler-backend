@@ -432,6 +432,13 @@ public class ScheduleAutomationService {
                 config.put("max_weekly_hours", weeklyCap);
             }
             addBoundaryHistory(config, employee, input);
+            for (int day = 0; day < input.numDays(); day++) {
+                if (employee.isGoneBy(input.dateOf(day))) {
+                    for (int s = 0; s < shifts.size(); s++) {
+                        unavailable.add(slot(day, s));
+                    }
+                }
+            }
             config.put("available_days", new ArrayList<>(availableDays));
             config.put("unavailable_slots", new ArrayList<>(unavailable));
             config.put("skills", skillKeys(employee, input.levelsByEmployee().getOrDefault(employee.getId(), List.of())));

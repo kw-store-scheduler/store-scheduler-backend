@@ -202,13 +202,14 @@ public class ShiftTradeService {
         }
     }
 
-    // 퇴사하는 직원이 낀 진행 중인 요청을 닫는다
+    // 퇴사하는 직원이 낀 진행 중인 요청 중 after 이후 근무가 걸린 것을 닫는다
     @Transactional
-    public void cancelOpenOf(Employee employee) {
+    public void cancelOpenOf(Employee employee, LocalDate after) {
         Long storeId = employee.getStore().getId();
         tradeRepository.findByStoreIdAndRequesterIdOrStoreIdAndTargetIdOrderByCreatedAtDesc(storeId, employee.getId(), storeId, employee.getId())
                 .stream()
                 .filter(ShiftTrade::isOpen)
+                .filter(t -> t.getRequesterDate().isAfter(after) || (t.getTargetDate() != null && t.getTargetDate().isAfter(after)))
                 .forEach(t -> t.resolve(TradeStatus.CANCELLED));
     }
 

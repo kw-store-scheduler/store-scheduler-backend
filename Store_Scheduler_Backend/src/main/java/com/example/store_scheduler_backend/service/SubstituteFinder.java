@@ -164,7 +164,9 @@ public class SubstituteFinder {
                     .sum();
 
             DayOffType dayOff = dayOffByEmployee.get(employee.getId());
-            Optional<String> blocker = dayOff == DayOffType.MUST
+            Optional<String> blocker = employee.isGoneBy(date)
+                    ? Optional.of("퇴사 예정 (마지막 근무일 " + employee.getResignedOn() + ")")
+                    : dayOff == DayOffType.MUST
                     ? Optional.of("필수 휴무 신청일")
                     : findBlocker(employee, availabilityByEmployee.get(employee.getId()), preferences, own, date, start, end,
                     weeklyHours + shiftHours, consecutiveLimit);

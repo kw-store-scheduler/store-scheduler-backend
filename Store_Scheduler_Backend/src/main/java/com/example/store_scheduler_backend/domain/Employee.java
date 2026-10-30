@@ -35,7 +35,7 @@ public class Employee {
 
     private LocalDateTime requestedAt;
 
-    // 퇴사 처리한 직원의 마지막 근무일
+    // 마지막 근무일. 아직 APPROVED면 퇴사 예정, RESIGNED면 퇴사 완료
     private LocalDate resignedOn;
 
     // 정규직 직책. 알바는 null
@@ -172,6 +172,19 @@ public class Employee {
 
     public void reject() {
         this.status = EmployeeStatus.REJECTED;
+    }
+
+    public void scheduleResignation(LocalDate lastWorkDate) {
+        this.resignedOn = lastWorkDate;
+    }
+
+    public void cancelScheduledResignation() {
+        this.resignedOn = null;
+    }
+
+    // 퇴사 예정일 뒤의 날짜인지
+    public boolean isGoneBy(LocalDate date) {
+        return resignedOn != null && date.isAfter(resignedOn);
     }
 
     public void resign(LocalDate lastWorkDate) {
