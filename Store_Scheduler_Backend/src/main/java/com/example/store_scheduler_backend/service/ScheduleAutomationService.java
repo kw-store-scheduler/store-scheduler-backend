@@ -134,7 +134,7 @@ public class ScheduleAutomationService {
                                Map<Long, List<EmployeeSkillLevel>> levelsByEmployee,
                                List<SkillWindowRequirement> windows,
                                Map<Long, List<UnavailablePeriod>> periodsByEmployee,
-                               List<Schedule> outside) {
+                               List<Schedule> outside, Map<Long, Set<YearMonth>> preferenceMonths) {
         LocalDate end() {
             return start.plusDays(numDays - 1);
         }
@@ -281,11 +281,15 @@ public class ScheduleAutomationService {
 
         Set<Long> preferenceEmployees = new HashSet<>(preferencesByEmployee.keySet());
         Map<Long, PreferenceSubmission> submissionByEmployee = new HashMap<>();
+        Map<Long, Set<YearMonth>> preferenceMonths = new HashMap<>();
+        preferencesByEmployee.forEach((id, rows) -> rows.forEach(p ->
+                preferenceMonths.computeIfAbsent(id, k -> new HashSet<>()).add(YearMonth.from(p.getDate()))));
         for (YearMonth m = YearMonth.from(start); !m.isAfter(YearMonth.from(end)); m = m.plusMonths(1)) {
             for (PreferenceSubmission submission : submissionRepository.findByEmployee_StoreIdAndMonth(storeId, m.atDay(1))) {
                 // 정규직은 날짜×교대 칸 없이 교대 선호만 내므로 제출만으로 칸 기준 판단을 하지 않는다
                 if (submission.getEmployee().getEmploymentType() != EmploymentType.FULL_TIME) {
                     preferenceEmployees.add(submission.getEmployee().getId());
+                    preferenceMonths.computeIfAbsent(submission.getEmployee().getId(), k -> new HashSet<>()).add(m);
                 }
                 if (m.equals(YearMonth.from(start))) {
                     submissionByEmployee.put(submission.getEmployee().getId(), submission);
@@ -307,7 +311,7 @@ public class ScheduleAutomationService {
                 windowRepository.findByStoreIdOrderByStartTimeAsc(storeId),
                 periodRepository.findByEmployee_StoreIdAndEndDateGreaterThanEqualAndStartDateLessThanEqual(storeId, start, end)
                         .stream().collect(Collectors.groupingBy(p -> p.getEmployee().getId())),
-                outsideSchedules(storeId, start, end));
+                outsideSchedules(storeId, start, end), preferenceMonths);
     }
 
     private List<Schedule> outsideSchedules(Long storeId, LocalDate start, LocalDate end) {
@@ -406,6 +410,7 @@ public class ScheduleAutomationService {
                         }
                     }
                 }
+                addUnsubmittedMonthDays(input, employee, availableDays, unavailable);
                 config.put("preferred_slots", preferred);
             } else {
                 unavailable.addAll(unavailableByAvailability(input, employee, availableDays));
@@ -599,6 +604,20 @@ public class ScheduleAutomationService {
             }
         }
         return slots;
+    }
+
+    // 월을 걸친 기간에서 희망을 내지 않은 달의 날짜는 요일별 가용 시간으로 판단한다
+    private void addUnsubmittedMonthDays(PeriodInput input, Employee employee, Set<Integer> availableDays,
+                                         Set<Map<String, Integer>> unavailable) {
+        Set<YearMonth> submitted = input.preferenceMonths().getOrDefault(employee.getId(), Set.of());
+        Set<Integer> byAvailability = new TreeSet<>();
+        List<Map<String, Integer>> slots = unavailableByAvailability(input, employee, byAvailability);
+        byAvailability.stream()
+                .filter(day -> !submitted.contains(YearMonth.from(input.dateOf(day))))
+                .forEach(availableDays::add);
+        slots.stream()
+                .filter(slot -> !submitted.contains(YearMonth.from(input.dateOf(slot.get("day")))))
+                .forEach(unavailable::add);
     }
 
     // 희망 제출 뒤에 고정 일정을 바꾼 경우에도 겹치는 칸은 근무 불가로 넘긴다. "이번 달만 예외" 기간은 그날 전부 불가
