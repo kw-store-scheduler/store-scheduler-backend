@@ -52,6 +52,7 @@ public class SwapRequestService {
     private final OpenShiftService openShiftService;
     private final SwapAssignment swapAssignment;
     private final ShiftTradeRepository tradeRepository;
+    private final RowLock rowLock;
 
     // 사장님 화면의 후보별 연락 상태. 대타 요청 상태(SENT 등)가 게시판 지원 상태보다 우선
     public record Contact(String status, LocalDateTime sentAt) {
@@ -227,6 +228,7 @@ public class SwapRequestService {
     public SwapRequest approve(Long storeId, Long requestId, String managerUsername) {
         storeAccessGuard.verifyOwner(storeId, managerUsername);
         SwapRequest request = findRequest(storeId, requestId);
+        rowLock.lock(request);
         if (request.getStatus() != SwapStatus.PENDING_APPROVAL) {
             throw new IllegalArgumentException("승인을 기다리는 대타가 없습니다.");
         }
@@ -244,6 +246,7 @@ public class SwapRequestService {
     public SwapRequest rejectSubstitute(Long storeId, Long requestId, String managerUsername) {
         storeAccessGuard.verifyOwner(storeId, managerUsername);
         SwapRequest request = findRequest(storeId, requestId);
+        rowLock.lock(request);
         if (request.getStatus() != SwapStatus.PENDING_APPROVAL) {
             throw new IllegalArgumentException("승인을 기다리는 대타가 없습니다.");
         }
@@ -260,7 +263,11 @@ public class SwapRequestService {
     @Transactional
     public SwapRequest assignDirectly(Long storeId, Long requestId, Long employeeId, String managerUsername) {
         storeAccessGuard.verifyOwner(storeId, managerUsername);
-        SwapRequest request = findActiveRequest(storeId, requestId);
+        SwapRequest request = findRequest(storeId, requestId);
+        rowLock.lock(request);
+        if (!request.isActive()) {
+            throw new IllegalArgumentException("이미 처리된 결원 요청입니다.");
+        }
         if (!isEligible(request, employeeId)) {
             throw new IllegalArgumentException("해당 직원은 이 근무를 대신할 수 없습니다. 대타 추천 목록을 확인해주세요.");
         }
@@ -273,7 +280,11 @@ public class SwapRequestService {
     @Transactional
     public SwapRequest cancel(Long storeId, Long requestId, String username) {
         Employee employee = storeAccessGuard.verifyApprovedEmployee(storeId, username);
-        SwapRequest request = findActiveRequest(storeId, requestId);
+        SwapRequest request = findRequest(storeId, requestId);
+        rowLock.lock(request);
+        if (!request.isActive()) {
+            throw new IllegalArgumentException("이미 처리된 결원 요청입니다.");
+        }
         if (!request.getRequester().getId().equals(employee.getId())) {
             throw new AccessDeniedException("본인이 요청한 결원만 취소할 수 있습니다.");
         }
@@ -393,10 +404,12 @@ public class SwapRequestService {
     }
 
     private SwapRequest respond(SwapOffer offer, boolean accept) {
+        SwapRequest request = offer.getSwapRequest();
+        rowLock.lock(request);
+        rowLock.lock(offer);
         if (!offer.isPending()) {
             throw new IllegalArgumentException("이미 응답했거나 마감된 대타 요청입니다.");
         }
-        SwapRequest request = offer.getSwapRequest();
         if (!accept) {
             offer.respond(OfferStatus.DECLINED);
             boolean stillWaiting = offerRepository.findBySwapRequestIdOrderBySentAtAsc(request.getId()).stream()

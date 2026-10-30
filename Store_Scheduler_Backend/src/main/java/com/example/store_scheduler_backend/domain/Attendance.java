@@ -41,6 +41,12 @@ public class Attendance {
         this.clockIn = clockIn;
     }
 
+    public void correct(LocalDateTime clockIn, LocalDateTime clockOut) {
+        this.workDate = clockIn.toLocalDate();
+        this.clockIn = clockIn;
+        this.clockOut = clockOut;
+    }
+
     public void clockOut(LocalDateTime clockOut) {
         this.clockOut = clockOut;
     }

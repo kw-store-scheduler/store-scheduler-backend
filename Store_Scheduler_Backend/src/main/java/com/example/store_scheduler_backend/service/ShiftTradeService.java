@@ -41,6 +41,7 @@ public class ShiftTradeService {
     private final StoreAccessGuard storeAccessGuard;
     private final SubstituteFinder substituteFinder;
     private final FcmService fcmService;
+    private final RowLock rowLock;
 
     // 넘기기는 동료별, 맞교환은 동료의 근무별 선택지. 안 되는 선택지는 사유와 함께
     public record Option(Employee employee, Schedule schedule, boolean available, String blocker) {
@@ -116,6 +117,7 @@ public class ShiftTradeService {
     public ShiftTrade respond(Long storeId, Long tradeId, boolean accept, String username) {
         Employee me = storeAccessGuard.verifyApprovedEmployee(storeId, username);
         ShiftTrade trade = findTrade(storeId, tradeId);
+        rowLock.lock(trade);
         if (!trade.getTarget().getId().equals(me.getId()) || trade.getStatus() != TradeStatus.REQUESTED) {
             throw new AccessDeniedException("본인에게 온 요청만 처리할 수 있습니다.");
         }
@@ -137,6 +139,7 @@ public class ShiftTradeService {
     public ShiftTrade approve(Long storeId, Long tradeId, String managerUsername) {
         storeAccessGuard.verifyOwner(storeId, managerUsername);
         ShiftTrade trade = findTrade(storeId, tradeId);
+        rowLock.lock(trade);
         if (trade.getStatus() != TradeStatus.PEER_ACCEPTED) {
             throw new IllegalArgumentException("동료가 수락한 요청만 승인할 수 있습니다.");
         }
@@ -156,6 +159,7 @@ public class ShiftTradeService {
     public ShiftTrade reject(Long storeId, Long tradeId, String managerUsername) {
         storeAccessGuard.verifyOwner(storeId, managerUsername);
         ShiftTrade trade = findTrade(storeId, tradeId);
+        rowLock.lock(trade);
         if (!trade.isOpen()) {
             throw new IllegalArgumentException("이미 처리된 요청입니다.");
         }
@@ -168,6 +172,7 @@ public class ShiftTradeService {
     public ShiftTrade cancel(Long storeId, Long tradeId, String username) {
         Employee me = storeAccessGuard.verifyApprovedEmployee(storeId, username);
         ShiftTrade trade = findTrade(storeId, tradeId);
+        rowLock.lock(trade);
         if (!trade.getRequester().getId().equals(me.getId()) || !trade.isOpen()) {
             throw new IllegalArgumentException("진행 중인 본인 요청만 취소할 수 있습니다.");
         }

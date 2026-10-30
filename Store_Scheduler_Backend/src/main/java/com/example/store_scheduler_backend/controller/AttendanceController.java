@@ -3,6 +3,9 @@ package com.example.store_scheduler_backend.controller;
 import com.example.store_scheduler_backend.domain.Attendance;
 import com.example.store_scheduler_backend.service.AttendanceService;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotNull;
+import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
@@ -50,6 +53,17 @@ public class AttendanceController {
                 .toList());
     }
 
+    // 관리자: 퇴근 누락·잘못 찍은 기록 수정
+    @PatchMapping("/api/stores/{storeId}/attendance/{attendanceId}")
+    public ResponseEntity<AttendanceResponse> correct(
+            @PathVariable Long storeId,
+            @PathVariable Long attendanceId,
+            @Valid @RequestBody CorrectRequest request,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        return ResponseEntity.ok(AttendanceResponse.from(attendanceService.correct(storeId, attendanceId, request.getClockIn(),
+                request.getClockOut(), userDetails.getUsername())));
+    }
+
     // 직원: 본인 출퇴근 기록
     @GetMapping("/api/stores/{storeId}/attendance/my")
     public ResponseEntity<List<AttendanceResponse>> getMine(
@@ -60,6 +74,13 @@ public class AttendanceController {
         return ResponseEntity.ok(attendanceService.findMine(storeId, from, to, userDetails.getUsername()).stream()
                 .map(AttendanceResponse::from)
                 .toList());
+    }
+
+    @Data
+    static class CorrectRequest {
+        @NotNull(message = "출근 시각을 입력해주세요.")
+        private LocalDateTime clockIn;
+        private LocalDateTime clockOut;
     }
 
     record AttendanceResponse(Long id, Long employeeId, String employeeName, LocalDate workDate,
