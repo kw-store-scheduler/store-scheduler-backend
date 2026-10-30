@@ -195,6 +195,16 @@ public class ShiftTradeService {
         }
     }
 
+    // 퇴사하는 직원이 낀 진행 중인 요청을 닫는다
+    @Transactional
+    public void cancelOpenOf(Employee employee) {
+        Long storeId = employee.getStore().getId();
+        tradeRepository.findByStoreIdAndRequesterIdOrStoreIdAndTargetIdOrderByCreatedAtDesc(storeId, employee.getId(), storeId, employee.getId())
+                .stream()
+                .filter(ShiftTrade::isOpen)
+                .forEach(t -> t.resolve(TradeStatus.CANCELLED));
+    }
+
     private void applyRecurring(Long storeId, ShiftTrade trade) {
         YearMonth month = YearMonth.from(trade.getRequesterDate());
         for (int week = 1; ; week++) {

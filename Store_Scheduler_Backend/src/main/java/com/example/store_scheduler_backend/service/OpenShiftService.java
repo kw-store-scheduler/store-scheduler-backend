@@ -204,6 +204,13 @@ public class OpenShiftService {
         application.withdraw();
     }
 
+    // 퇴사하는 직원의 지원을 거둔다
+    @Transactional
+    public void withdrawAll(Employee employee) {
+        applicationRepository.findByEmployeeIdAndStatus(employee.getId(), ApplicationStatus.APPLIED)
+                .forEach(ShiftApplication::withdraw);
+    }
+
     public List<Applicant> findApplications(Long storeId, Long openShiftId, String managerUsername) {
         storeAccessGuard.verifyOwner(storeId, managerUsername);
         OpenShift openShift = findInStore(storeId, openShiftId);

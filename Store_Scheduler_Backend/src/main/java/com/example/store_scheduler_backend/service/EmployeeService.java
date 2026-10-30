@@ -3,9 +3,11 @@ package com.example.store_scheduler_backend.service;
 import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.EmploymentType;
 import com.example.store_scheduler_backend.domain.EmployeeStatus;
+import com.example.store_scheduler_backend.domain.Schedule;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.domain.User;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
+import com.example.store_scheduler_backend.repository.ScheduleRepository;
 import com.example.store_scheduler_backend.repository.StoreRepository;
 import com.example.store_scheduler_backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -13,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Optional;
 
 @Service
 @Transactional(readOnly = true)
@@ -25,6 +28,14 @@ public class EmployeeService {
     private final FcmService fcmService;
     private final StoreAccessGuard storeAccessGuard;
     private final EmployeeProfileService profileService;
+    private final ScheduleRepository scheduleRepository;
+    private final SwapRequestService swapRequestService;
+    private final ShiftTradeService shiftTradeService;
+    private final OpenShiftService openShiftService;
+
+    // removedShifts: 마지막 근무일 뒤에 잡혀 있어 지운 근무 수. 비게 된 자리는 점주가 채운다
+    public record Resignation(LocalDate lastWorkDate, int removedShifts) {
+    }
 
     @Transactional
     public Employee joinStore(String storeCode, String name, String phoneNumber, String username) {
@@ -39,11 +50,14 @@ public class EmployeeService {
         Store store = storeRepository.findByStoreCode(storeCode)
                 .orElseThrow(() -> new IllegalArgumentException("유효하지 않은 매장 코드입니다."));
 
-        employeeRepository.findByStoreIdAndUserId(store.getId(), user.getId()).ifPresent(e -> {
+        Optional<Employee> existing = employeeRepository.findByStoreIdAndUserId(store.getId(), user.getId());
+        if (existing.isPresent() && (existing.get().getStatus() == EmployeeStatus.PENDING
+                || existing.get().getStatus() == EmployeeStatus.APPROVED)) {
             throw new IllegalArgumentException("이미 해당 매장에 신청한 이력이 있습니다.");
-        });
+        }
 
-        Employee employee = new Employee(name, phoneNumber, store, user);
+        Employee employee = existing.orElseGet(() -> new Employee(name, phoneNumber, store, user));
+        employee.reapply(name, phoneNumber);
         employee.fillJoinProfile(nickname, startDate, minor, employmentType);
         Employee saved = employeeRepository.save(employee);
         fcmService.send(store.getOwner(), "가입 요청",
@@ -87,6 +101,40 @@ public class EmployeeService {
                 "가입 신청 거절",
                 store.getName() + "에서 가입 신청이 거절되었습니다."
         );
+    }
+
+    // 마지막 근무일이 지난 뒤(또는 당일) 처리한다. 지난 근무와 급여 기록은 남기고 이후 근무만 지운다
+    @Transactional
+    public Resignation resign(Long storeId, Long employeeId, LocalDate lastWorkDate, String managerUsername) {
+        Store store = storeAccessGuard.verifyOwner(storeId, managerUsername);
+        Employee employee = findOne(employeeId);
+        if (!employee.getStore().getId().equals(storeId)) {
+            throw new IllegalArgumentException("해당 매장 소속 직원이 아닙니다.");
+        }
+        if (employee.getStatus() != EmployeeStatus.APPROVED) {
+            throw new IllegalArgumentException("승인된 직원만 퇴사 처리할 수 있습니다.");
+        }
+        LocalDate last = lastWorkDate != null ? lastWorkDate : LocalDate.now();
+        if (last.isAfter(LocalDate.now())) {
+            throw new IllegalArgumentException("마지막 근무일은 오늘 이후일 수 없습니다. 근무를 마친 뒤 처리해주세요.");
+        }
+        List<Schedule> removed = scheduleRepository.findByStoreIdAndEmployeeIdOrderByWorkDateAscStartTimeAsc(storeId, employeeId).stream()
+                .filter(s -> s.getWorkDate().isAfter(last))
+                .toList();
+        swapRequestService.detachSchedules(removed);
+        shiftTradeService.detachSchedules(removed.stream().map(Schedule::getId).toList());
+        scheduleRepository.deleteAll(removed);
+        swapRequestService.releaseSubstitute(employee);
+        shiftTradeService.cancelOpenOf(employee);
+        openShiftService.withdrawAll(employee);
+        employee.resign(last);
+        profileService.recordChange(employee, store.getName() + " 퇴사 처리 (마지막 근무일 " + last + ")");
+        return new Resignation(last, removed.size());
+    }
+
+    public List<Employee> findResignedByStore(Long storeId, String managerUsername) {
+        storeAccessGuard.verifyOwner(storeId, managerUsername);
+        return employeeRepository.findByStoreIdAndStatus(storeId, EmployeeStatus.RESIGNED);
     }
 
     public List<Employee> findApprovedByStore(Long storeId, String managerUsername) {
