@@ -178,6 +178,11 @@ public class EmployeeProfileService {
         return getProfile(storeId, employeeId, managerUsername);
     }
 
+    public List<FixedSchedule> findFixedSchedules(Long storeId, Long employeeId, String managerUsername) {
+        storeAccessGuard.verifyOwner(storeId, managerUsername);
+        return fixedScheduleRepository.findByEmployeeId(storeEmployee(storeId, employeeId).getId());
+    }
+
     // 점주: 직원 대신 고정 일정 입력
     @Transactional
     public List<FixedSchedule> replaceFixedSchedules(Long storeId, Long employeeId, List<PreferenceService.FixedScheduleInput> inputs,

@@ -221,6 +221,10 @@ public class Employee {
         this.requestedAt = LocalDateTime.now();
     }
 
+    public void cancelReapply() {
+        this.status = EmployeeStatus.RESIGNED;
+    }
+
     public void updateHourlyWage(int hourlyWage) {
         this.hourlyWage = hourlyWage;
     }

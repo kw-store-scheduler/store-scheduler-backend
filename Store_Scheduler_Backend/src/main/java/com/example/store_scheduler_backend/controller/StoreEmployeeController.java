@@ -44,6 +44,15 @@ public class StoreEmployeeController {
     }
 
     // 관리자: 승인 대기 목록 조회
+    // 직원: 승인 전 합류 신청 취소
+    @DeleteMapping("/api/stores/{storeId}/join")
+    public ResponseEntity<Void> cancelJoin(
+            @PathVariable Long storeId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        employeeService.cancelJoin(storeId, userDetails.getUsername());
+        return ResponseEntity.noContent().build();
+    }
+
     @GetMapping("/api/stores/{storeId}/employees/pending")
     public ResponseEntity<List<EmployeeResponse>> getPendingEmployees(
             @PathVariable Long storeId,

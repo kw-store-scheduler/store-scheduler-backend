@@ -123,6 +123,15 @@ public class EmployeeProfileController {
     }
 
     // 관리자: 직원 대신 고정 일정 입력 (통째로 교체)
+    @GetMapping("/api/stores/{storeId}/employees/{employeeId}/fixed-schedules")
+    public ResponseEntity<List<FixedScheduleResponse>> getFixedSchedules(
+            @PathVariable Long storeId,
+            @PathVariable Long employeeId,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        return ResponseEntity.ok(profileService.findFixedSchedules(storeId, employeeId, userDetails.getUsername())
+                .stream().map(FixedScheduleResponse::from).toList());
+    }
+
     @PutMapping("/api/stores/{storeId}/employees/{employeeId}/fixed-schedules")
     public ResponseEntity<List<FixedScheduleResponse>> replaceFixedSchedules(
             @PathVariable Long storeId,
@@ -270,9 +279,11 @@ public class EmployeeProfileController {
         }
     }
 
-    record FixedScheduleResponse(Long id, DayOfWeek dayOfWeek, LocalTime startTime, LocalTime endTime, String label) {
+    record FixedScheduleResponse(Long id, DayOfWeek dayOfWeek, LocalTime startTime, LocalTime endTime, String label,
+                                 FixedScheduleCategory category, LocalDate validFrom, LocalDate validUntil) {
         static FixedScheduleResponse from(FixedSchedule f) {
-            return new FixedScheduleResponse(f.getId(), f.getDayOfWeek(), f.getStartTime(), f.getEndTime(), f.getLabel());
+            return new FixedScheduleResponse(f.getId(), f.getDayOfWeek(), f.getStartTime(), f.getEndTime(), f.getLabel(),
+                    f.getCategory(), f.getValidFrom(), f.getValidUntil());
         }
     }
 

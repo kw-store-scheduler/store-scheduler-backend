@@ -8,7 +8,10 @@ import com.example.store_scheduler_backend.domain.Schedule;
 import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.domain.User;
 import com.example.store_scheduler_backend.domain.WageChange;
+import com.example.store_scheduler_backend.repository.EmployeeChangeLogRepository;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
+import com.example.store_scheduler_backend.repository.EmployeeSkillLevelRepository;
+import com.example.store_scheduler_backend.repository.FixedScheduleRepository;
 import com.example.store_scheduler_backend.repository.ScheduleRepository;
 import com.example.store_scheduler_backend.repository.StoreRepository;
 import com.example.store_scheduler_backend.repository.UserRepository;
@@ -36,6 +39,9 @@ public class EmployeeService {
     private final ShiftTradeService shiftTradeService;
     private final OpenShiftService openShiftService;
     private final WageChangeRepository wageChangeRepository;
+    private final FixedScheduleRepository fixedScheduleRepository;
+    private final EmployeeSkillLevelRepository skillLevelRepository;
+    private final EmployeeChangeLogRepository changeLogRepository;
 
     // removedShifts: 마지막 근무일 뒤에 잡혀 있어 지운 근무 수. 비게 된 자리는 점주가 채운다
     public record Resignation(LocalDate lastWorkDate, int removedShifts) {
@@ -67,6 +73,24 @@ public class EmployeeService {
         fcmService.send(store.getOwner(), "가입 요청",
                 employee.getName() + "님이 " + store.getName() + " 가입을 요청했습니다.");
         return saved;
+    }
+
+    // 대기 중인 본인 신청만 취소한다. 일한 적 있는 직원의 재합류 신청이면 기록을 남기고 퇴사 상태로 되돌린다
+    @Transactional
+    public void cancelJoin(Long storeId, String username) {
+        Employee employee = employeeRepository.findByStoreIdAndUser_Username(storeId, username)
+                .filter(e -> e.getStatus() == EmployeeStatus.PENDING)
+                .orElseThrow(() -> new IllegalArgumentException("취소할 합류 신청이 없습니다."));
+        if (employee.getResignedOn() != null) {
+            employee.cancelReapply();
+        } else {
+            fixedScheduleRepository.deleteAll(fixedScheduleRepository.findByEmployeeId(employee.getId()));
+            skillLevelRepository.deleteAll(skillLevelRepository.findByEmployeeId(employee.getId()));
+            changeLogRepository.deleteAll(changeLogRepository.findByEmployeeIdOrderByCreatedAtDescIdDesc(employee.getId()));
+            wageChangeRepository.deleteAll(wageChangeRepository.findByEmployeeIdOrderByIdAsc(employee.getId()));
+            employeeRepository.delete(employee);
+        }
+        fcmService.send(employee.getStore().getOwner(), "가입 신청 취소", employee.getName() + "님이 가입 신청을 취소했습니다.");
     }
 
     @Transactional

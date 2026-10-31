@@ -90,9 +90,13 @@ public class StoreService {
     }
 
     @Transactional
-    public Store updateInfo(Long storeId, String name, String address, String managerUsername) {
+    public Store updateInfo(Long storeId, String name, String address, Industry industry, String managerUsername) {
         Store store = storeAccessGuard.verifyOwner(storeId, managerUsername);
         store.updateInfo(name, address);
+        // 이미 쓰는 스킬·교대가 있으니 기본값을 다시 넣지 않고 업종 표시만 바꾼다
+        if (industry != null) {
+            store.changeIndustry(industry);
+        }
         return store;
     }
 
