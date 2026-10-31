@@ -61,7 +61,7 @@ public class StoreController {
             @Valid @RequestBody StoreInfoRequest request,
             @AuthenticationPrincipal UserDetails userDetails) {
         return ResponseEntity.ok(StoreResponse.from(
-                storeService.updateInfo(storeId, request.getName(), request.getAddress(), userDetails.getUsername())));
+                storeService.updateInfo(storeId, request.getName(), request.getAddress(), request.getIndustry(), userDetails.getUsername())));
     }
 
     @PostMapping("/{storeId}/reissue-code")
@@ -111,6 +111,8 @@ public class StoreController {
         @NotBlank(message = "매장 이름을 입력해주세요.")
         private String name;
         private String address;
+        // 생략하면 그대로
+        private Industry industry;
     }
 
     @Data
