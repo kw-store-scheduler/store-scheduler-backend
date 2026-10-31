@@ -71,6 +71,7 @@ class ScheduleManualEditTest {
         dayOffRequestRepository.save(new DayOffRequest(yuna, DAY, DayOffType.MUST, "병원"));
 
         create(yuna, DAY, false).andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.forceable").value(true))
                 .andExpect(jsonPath("$.message").value(org.hamcrest.Matchers.containsString("필수 휴무")));
         create(yuna, DAY, true).andExpect(status().isOk());
     }

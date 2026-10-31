@@ -132,8 +132,7 @@ public class ScheduleService {
         }
         substituteFinder.blockerAfterChanges(storeId, employee, workDate, startTime, endTime, removed, List.of())
                 .ifPresent(blocker -> {
-                    throw new IllegalArgumentException(employee.getDisplayName() + "님에게 배정할 수 없습니다: " + blocker
-                            + ". 그래도 배정하려면 force로 요청해주세요.");
+                    throw new ForceableRuleException(employee.getDisplayName() + "님에게 배정할 수 없습니다: " + blocker + ".");
                 });
     }
 

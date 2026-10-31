@@ -140,7 +140,7 @@ public class ScheduleController {
         return ResponseEntity.ok(result);
     }
 
-    @Operation(summary = "근무 직접 추가", description = "휴무·가용 시간·주 52시간 같은 근무 규칙에 걸리면 400과 사유로 응답합니다. force=true면 점주 판단으로 배정합니다.")
+    @Operation(summary = "근무 직접 추가", description = "휴무·가용 시간·주 52시간 같은 근무 규칙에 걸리면 400과 사유, forceable: true로 응답합니다. force=true면 점주 판단으로 배정합니다. forceable이 없는 400은 force로 진행할 수 없습니다.")
     @PostMapping
     public ResponseEntity<ScheduleResponseDto> createSchedule(
             @PathVariable Long storeId,

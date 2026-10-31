@@ -12,6 +12,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.LocalTime;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -24,6 +25,7 @@ class AttendanceCorrectionTest {
     @Autowired StoreRepository storeRepository;
     @Autowired EmployeeRepository employeeRepository;
     @Autowired AttendanceRepository attendanceRepository;
+    @Autowired ScheduleRepository scheduleRepository;
     @Autowired AttendanceService attendanceService;
 
     private Store store;
@@ -76,5 +78,50 @@ class AttendanceCorrectionTest {
 
         assertThat(nextWeek.periodStart()).isEqualTo(first.periodStart());
         assertThat(later.periodStart()).isEqualTo(first.periodEnd().plusDays(1));
+    }
+
+    @Test
+    void 점주가_출근을_찍지_않은_날의_기록을_만든다() {
+        LocalDateTime clockIn = LocalDate.now().minusDays(2).atTime(9, 0);
+
+        AttendanceService.AttendanceView view = attendanceService.create(store.getId(), employee.getId(), clockIn, clockIn.plusHours(5), "owner");
+
+        assertThat(view.attendance().getWorkDate()).isEqualTo(clockIn.toLocalDate());
+        assertThat(view.attendance().getClockOut()).isEqualTo(clockIn.plusHours(5));
+        assertThatThrownBy(() -> attendanceService.create(store.getId(), employee.getId(), clockIn, clockIn.plusHours(5), "owner"))
+                .hasMessageContaining("이미 그날");
+        assertThatThrownBy(() -> attendanceService.create(store.getId(), employee.getId(), LocalDateTime.now().plusDays(1), null, "owner"))
+                .hasMessageContaining("앞으로의");
+        assertThatThrownBy(() -> attendanceService.create(store.getId(), employee.getId(), clockIn.plusDays(1), clockIn.plusDays(1), "owner"))
+                .hasMessageContaining("퇴근 시각");
+    }
+
+    @Test
+    void 근무가_있었는데_출근_기록이_없는_직원만_결근으로_나온다() {
+        Employee attended = new Employee("출근자", null, store, userRepository.save(new User("attended", "pw", Role.EMPLOYEE)));
+        attended.approve(10030);
+        employeeRepository.save(attended);
+        LocalDate day = LocalDate.now().minusDays(1);
+        schedule(employee, day, 14);
+        schedule(employee, day, 9);
+        schedule(attended, day, 9);
+        attendanceRepository.save(new Attendance(attended, day.atTime(9, 0)));
+        schedule(employee, LocalDate.now().plusDays(1), 9);
+
+        assertThat(attendanceService.findAbsences(store.getId(), day, "owner")).singleElement().satisfies(a -> {
+            assertThat(a.employeeId()).isEqualTo(employee.getId());
+            assertThat(a.scheduledStart()).isEqualTo(LocalTime.of(9, 0));
+        });
+        assertThat(attendanceService.findAbsences(store.getId(), LocalDate.now().plusDays(1), "owner")).isEmpty();
+    }
+
+    private void schedule(Employee who, LocalDate date, int startHour) {
+        Schedule schedule = new Schedule();
+        schedule.setStore(store);
+        schedule.setEmployee(who);
+        schedule.setWorkDate(date);
+        schedule.setStartTime(LocalTime.of(startHour, 0));
+        schedule.setEndTime(LocalTime.of(startHour + 3, 0));
+        scheduleRepository.save(schedule);
     }
 }

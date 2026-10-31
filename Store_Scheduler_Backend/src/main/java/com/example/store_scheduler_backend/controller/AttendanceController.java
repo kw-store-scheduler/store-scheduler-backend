@@ -53,6 +53,25 @@ public class AttendanceController {
                 .toList());
     }
 
+    // 관리자: 출근을 찍지 않은 날의 기록 만들기
+    @PostMapping("/api/stores/{storeId}/attendance")
+    public ResponseEntity<AttendanceResponse> create(
+            @PathVariable Long storeId,
+            @Valid @RequestBody CreateRequest request,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        return ResponseEntity.ok(AttendanceResponse.from(attendanceService.create(storeId, request.getEmployeeId(), request.getClockIn(),
+                request.getClockOut(), userDetails.getUsername())));
+    }
+
+    // 관리자: 근무 시작 시각이 지났는데 출근 기록이 없는 직원 (생략하면 오늘)
+    @GetMapping("/api/stores/{storeId}/attendance/absences")
+    public ResponseEntity<List<AttendanceService.Absence>> getAbsences(
+            @PathVariable Long storeId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        return ResponseEntity.ok(attendanceService.findAbsences(storeId, date != null ? date : LocalDate.now(), userDetails.getUsername()));
+    }
+
     // 관리자: 퇴근 누락·잘못 찍은 기록 수정
     @PatchMapping("/api/stores/{storeId}/attendance/{attendanceId}")
     public ResponseEntity<AttendanceResponse> correct(
@@ -74,6 +93,15 @@ public class AttendanceController {
         return ResponseEntity.ok(attendanceService.findMine(storeId, from, to, userDetails.getUsername()).stream()
                 .map(AttendanceResponse::from)
                 .toList());
+    }
+
+    @Data
+    static class CreateRequest {
+        @NotNull(message = "직원을 선택해주세요.")
+        private Long employeeId;
+        @NotNull(message = "출근 시각을 입력해주세요.")
+        private LocalDateTime clockIn;
+        private LocalDateTime clockOut;
     }
 
     @Data

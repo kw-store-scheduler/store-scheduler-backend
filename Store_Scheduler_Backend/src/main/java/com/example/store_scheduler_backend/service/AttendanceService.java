@@ -2,8 +2,10 @@ package com.example.store_scheduler_backend.service;
 
 import com.example.store_scheduler_backend.domain.Attendance;
 import com.example.store_scheduler_backend.domain.Employee;
+import com.example.store_scheduler_backend.domain.EmployeeStatus;
 import com.example.store_scheduler_backend.domain.Schedule;
 import com.example.store_scheduler_backend.repository.AttendanceRepository;
+import com.example.store_scheduler_backend.repository.EmployeeRepository;
 import com.example.store_scheduler_backend.repository.ScheduleRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
@@ -17,6 +19,8 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.function.BinaryOperator;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -30,12 +34,16 @@ public class AttendanceService {
     private final AttendanceRepository attendanceRepository;
     private final ScheduleRepository scheduleRepository;
     private final StoreAccessGuard storeAccessGuard;
+    private final EmployeeRepository employeeRepository;
 
     // scheduledStart가 없으면 근무표에 없는 날 출근한 것
     public record AttendanceView(Attendance attendance, LocalTime scheduledStart, LocalTime scheduledEnd) {
         public boolean late() {
             return scheduledStart != null && attendance.getClockIn().toLocalTime().isAfter(scheduledStart);
         }
+    }
+
+    public record Absence(Long employeeId, String employeeName, LocalTime scheduledStart, LocalTime scheduledEnd) {
     }
 
     @Transactional
@@ -74,6 +82,50 @@ public class AttendanceService {
         }
         attendance.correct(clockIn, clockOut);
         return toView(attendance);
+    }
+
+    // 점주: 출근을 찍지 않은 날의 기록을 직접 만든다
+    @Transactional
+    public AttendanceView create(Long storeId, Long employeeId, LocalDateTime clockIn, LocalDateTime clockOut, String managerUsername) {
+        storeAccessGuard.verifyOwner(storeId, managerUsername);
+        Employee employee = employeeRepository.findById(employeeId)
+                .filter(e -> e.getStore().getId().equals(storeId))
+                .filter(e -> e.getStatus() == EmployeeStatus.APPROVED || e.getStatus() == EmployeeStatus.RESIGNED)
+                .orElseThrow(() -> new IllegalArgumentException("해당 매장 소속 직원이 아닙니다."));
+        LocalDate workDate = clockIn.toLocalDate();
+        if (clockIn.isAfter(LocalDateTime.now())) {
+            throw new IllegalArgumentException("앞으로의 출근 기록은 만들 수 없습니다.");
+        }
+        if (employee.isGoneBy(workDate)) {
+            throw new IllegalArgumentException(employee.getDisplayName() + "님의 마지막 근무일(" + employee.getResignedOn() + ") 뒤의 기록은 만들 수 없습니다.");
+        }
+        if (clockOut != null && !clockOut.isAfter(clockIn)) {
+            throw new IllegalArgumentException("퇴근 시각은 출근 시각보다 늦어야 합니다.");
+        }
+        if (attendanceRepository.findByEmployeeIdAndWorkDate(employeeId, workDate).isPresent()) {
+            throw new IllegalArgumentException("이미 그날 출근 기록이 있습니다. 기존 기록을 수정해주세요.");
+        }
+        Attendance attendance = new Attendance(employee, clockIn);
+        attendance.correct(clockIn, clockOut);
+        return toView(attendanceRepository.save(attendance));
+    }
+
+    // 근무 시작 시각이 지났는데 그날 출근 기록이 없는 직원. 하루에 근무가 여럿이면 가장 이른 근무로 보여 준다
+    public List<Absence> findAbsences(Long storeId, LocalDate date, String managerUsername) {
+        storeAccessGuard.verifyOwner(storeId, managerUsername);
+        LocalDateTime now = LocalDateTime.now();
+        Set<Long> attended = attendanceRepository.findByStoreIdAndWorkDateOrderByClockInAsc(storeId, date).stream()
+                .map(a -> a.getEmployee().getId())
+                .collect(Collectors.toSet());
+        Map<Long, Schedule> firstByEmployee = scheduleRepository.findByStoreIdAndWorkDateBetween(storeId, date, date).stream()
+                .collect(Collectors.toMap(s -> s.getEmployee().getId(), Function.identity(),
+                        BinaryOperator.minBy(Comparator.comparing(Schedule::getStartTime))));
+        return firstByEmployee.values().stream()
+                .filter(s -> !attended.contains(s.getEmployee().getId()))
+                .filter(s -> !date.atTime(s.getStartTime()).isAfter(now))
+                .sorted(Comparator.comparing(Schedule::getStartTime))
+                .map(s -> new Absence(s.getEmployee().getId(), s.getEmployee().getDisplayName(), s.getStartTime(), s.getEndTime()))
+                .toList();
     }
 
     public List<AttendanceView> findByDate(Long storeId, LocalDate date, String managerUsername) {
