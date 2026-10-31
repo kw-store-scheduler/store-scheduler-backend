@@ -1,5 +1,6 @@
 package com.example.store_scheduler_backend.config;
 
+import com.example.store_scheduler_backend.service.ForceableRuleException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
@@ -21,6 +22,11 @@ import java.util.stream.Collectors;
 @Slf4j
 @RestControllerAdvice
 public class GlobalExceptionHandler {
+
+    @ExceptionHandler(ForceableRuleException.class)
+    public ResponseEntity<Map<String, Object>> handleForceableRule(ForceableRuleException e) {
+        return ResponseEntity.badRequest().body(Map.of("message", e.getMessage(), "forceable", true));
+    }
 
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<Map<String, String>> handleIllegalArgument(IllegalArgumentException e) {
