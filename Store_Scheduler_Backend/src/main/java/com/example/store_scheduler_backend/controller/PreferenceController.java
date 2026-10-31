@@ -1,5 +1,6 @@
 package com.example.store_scheduler_backend.controller;
 
+import com.example.store_scheduler_backend.domain.ContractExceedStatus;
 import com.example.store_scheduler_backend.domain.FixedSchedule;
 import com.example.store_scheduler_backend.domain.FixedScheduleCategory;
 import com.example.store_scheduler_backend.domain.ShiftAttitude;
@@ -185,7 +186,10 @@ public class PreferenceController {
                                 e.submission() != null,
                                 e.submission() != null ? e.submission().getSubmittedAt() : null,
                                 e.submission() != null && e.submission().getSubmittedAt().toLocalDate().isAfter(view.deadline()),
-                                e.availableCount(), e.preferredCount(), e.weekendAvailable(), e.needsContractApproval()))
+                                e.availableCount(), e.preferredCount(), e.weekendAvailable(), e.needsContractApproval(),
+                                e.contractExceedStatus(),
+                                e.submission() != null ? e.submission().getMaxMonthlyHours() : null,
+                                PreferenceService.contractMonthly(e.employee().getContractMaxWeeklyHours(), view.month())))
                         .toList()));
     }
 
@@ -279,15 +283,16 @@ public class PreferenceController {
     record CellResponse(LocalDate date, Long shiftId, PreferenceLevel level, boolean locked, String lockLabel) {
     }
 
-    // contractExceedApproved: 계약 상한을 넘겨 신청했을 때만 값이 있다 (false면 승인 전·거절)
+    // contractExceedStatus: 계약 상한을 넘겨 신청했을 때만 값이 있다. contractExceedApproved는 false면 승인 전·거절이라 구분이 안 된다
     record SubmissionResponse(LocalDateTime submittedAt, Integer maxWeekendShifts, Integer minMonthlyHours,
                               Integer maxMonthlyHours, Integer maxConsecutiveDays, boolean noOpenAfterClose,
                               List<PreferencePriority> priorities, Map<Long, ShiftAttitude> shiftAttitudes,
-                              boolean restDaysTogether, Boolean contractExceedApproved) {
+                              boolean restDaysTogether, Boolean contractExceedApproved,
+                              ContractExceedStatus contractExceedStatus) {
         static SubmissionResponse from(PreferenceSubmission s) {
             return s == null ? null : new SubmissionResponse(s.getSubmittedAt(), s.getMaxWeekendShifts(), s.getMinMonthlyHours(),
                     s.getMaxMonthlyHours(), s.getMaxConsecutiveDays(), s.isNoOpenAfterClose(), s.getPriorityList(),
-                    s.getShiftAttitudeMap(), s.isRestDaysTogether(), s.getContractExceedApproved());
+                    s.getShiftAttitudeMap(), s.isRestDaysTogether(), s.getContractExceedApproved(), s.getContractExceedStatus());
         }
     }
 
@@ -307,7 +312,9 @@ public class PreferenceController {
     }
 
     record EmployeeStatus(Long employeeId, String name, boolean submitted, LocalDateTime submittedAt, boolean late,
-                          int availableCount, int preferredCount, boolean weekendAvailable, boolean needsContractApproval) {
+                          int availableCount, int preferredCount, boolean weekendAvailable, boolean needsContractApproval,
+                          ContractExceedStatus contractExceedStatus, Integer requestedMaxMonthlyHours,
+                          Integer contractMaxMonthlyHours) {
     }
 
     record StoreStatusResponse(String month, LocalDate deadline, long daysUntilDeadline, long submittedCount,

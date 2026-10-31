@@ -1,5 +1,6 @@
 package com.example.store_scheduler_backend.service;
 
+import com.example.store_scheduler_backend.domain.ContractExceedStatus;
 import com.example.store_scheduler_backend.domain.Employee;
 import com.example.store_scheduler_backend.domain.EmployeeStatus;
 import com.example.store_scheduler_backend.domain.FixedSchedule;
@@ -107,9 +108,13 @@ public class PreferenceService {
 
     public record EmployeeStatusView(Employee employee, PreferenceSubmission submission, int availableCount,
                                      int preferredCount, boolean weekendAvailable) {
-        // 계약 상한을 넘겨 신청했고 아직 승인하지 않음
+        public ContractExceedStatus contractExceedStatus() {
+            return submission != null ? submission.getContractExceedStatus() : null;
+        }
+
+        // 계약 상한을 넘겨 신청했고 아직 결정하지 않음
         public boolean needsContractApproval() {
-            return submission != null && Boolean.FALSE.equals(submission.getContractExceedApproved());
+            return contractExceedStatus() == ContractExceedStatus.PENDING;
         }
     }
 
@@ -189,6 +194,7 @@ public class PreferenceService {
 
         PreferenceSubmission submission = submissionRepository.findByEmployeeIdAndMonth(employee.getId(), month.atDay(1))
                 .orElseGet(() -> new PreferenceSubmission(employee, month.atDay(1)));
+        Integer previousMax = submission.getMaxMonthlyHours();
         submission.update(input.maxWeekendShifts(), input.minMonthlyHours(), input.maxMonthlyHours(),
                 input.maxConsecutiveDays(), input.noOpenAfterClose(),
                 input.priorities() != null ? input.priorities().stream().distinct().toList() : List.of());
@@ -197,10 +203,14 @@ public class PreferenceService {
             throw new IllegalArgumentException("매장에 없는 교대가 있습니다.");
         }
         submission.updateFullTimeOptions(attitudes, input.restDaysTogether());
-        // 계약 상한을 넘는 근무량은 점주 승인을 기다린다
+        // 계약 상한을 넘는 근무량은 점주 승인을 기다린다. 같은 시간으로 다시 제출하면 이미 내린 결정을 유지한다
         Integer contractMax = contractMonthly(employee.getContractMaxWeeklyHours(), month);
-        if (contractMax != null && input.maxMonthlyHours() != null && input.maxMonthlyHours() > contractMax) {
-            submission.decideContractExceed(false);
+        if (contractMax == null || input.maxMonthlyHours() == null || input.maxMonthlyHours() <= contractMax) {
+            submission.clearContractExceed();
+        } else if (submission.getContractExceedStatus() == null || !input.maxMonthlyHours().equals(previousMax)) {
+            submission.requestContractExceed();
+            fcmService.send(employee.getStore().getOwner(), "계약 초과 근무 승인 필요",
+                    employee.getDisplayName() + "님이 " + month + " 근무를 계약보다 많은 " + input.maxMonthlyHours() + "시간까지 신청했어요.");
         }
         submissionRepository.save(submission);
         return buildView(employee, month);
@@ -235,6 +245,8 @@ public class PreferenceService {
                 .filter(s -> s.getEmployee().getStore().getId().equals(storeId) && s.getContractExceedApproved() != null)
                 .orElseThrow(() -> new IllegalArgumentException("계약 상한을 넘긴 신청이 없습니다."));
         submission.decideContractExceed(approved);
+        fcmService.send(submission.getEmployee().getUser(), approved ? "계약 초과 근무 승인" : "계약 초과 근무 거절",
+                month + " 근무를 계약보다 많이 신청한 건이 " + (approved ? "승인되었어요." : "거절되어 계약 시간까지만 배정돼요."));
     }
 
     // 지난달 제출 내용을 이번 달 칸에 옮겨 담은 초안. 저장하지 않고 돌려준다 (제출은 마지막 단계에서)

@@ -10,6 +10,7 @@ import java.util.List;
 
 @Repository
 public interface ShiftTradeRepository extends JpaRepository<ShiftTrade, Long> {
+    long countByStoreIdAndStatus(Long storeId, TradeStatus status);
     List<ShiftTrade> findByStoreIdAndStatusInOrderByCreatedAtDesc(Long storeId, Collection<TradeStatus> statuses);
     List<ShiftTrade> findByStoreIdAndRequesterIdOrStoreIdAndTargetIdOrderByCreatedAtDesc(Long storeId, Long requesterId,
                                                                                           Long storeId2, Long targetId);

@@ -10,11 +10,13 @@ import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.domain.SwapRequest;
 import com.example.store_scheduler_backend.domain.OfferStatus;
 import com.example.store_scheduler_backend.domain.SwapOffer;
+import com.example.store_scheduler_backend.domain.TradeStatus;
 import com.example.store_scheduler_backend.repository.AttendanceRepository;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
 import com.example.store_scheduler_backend.repository.PreferenceSubmissionRepository;
 import com.example.store_scheduler_backend.repository.ScheduleRepository;
 import com.example.store_scheduler_backend.repository.ShiftRepository;
+import com.example.store_scheduler_backend.repository.ShiftTradeRepository;
 import com.example.store_scheduler_backend.repository.SwapOfferRepository;
 import com.example.store_scheduler_backend.repository.SwapRequestRepository;
 import lombok.RequiredArgsConstructor;
@@ -44,6 +46,7 @@ public class HomeService {
     private final ShiftRepository shiftRepository;
     private final SwapRequestRepository swapRequestRepository;
     private final SwapOfferRepository offerRepository;
+    private final ShiftTradeRepository tradeRepository;
     private final AttendanceRepository attendanceRepository;
     private final PayrollService payrollService;
     private final PreferenceSubmissionRepository submissionRepository;
@@ -66,7 +69,8 @@ public class HomeService {
 
     public record OwnerHome(Store store, LocalDate date, LocalDate weekStart, long weeklyLaborCost, long employeeCount,
                             long pendingApprovals, List<SwapRequest> activeVacancies, List<ShiftStatus> todayShifts,
-                            List<Attendance> todayAttendance, PreferenceStatus nextMonthPreferences, long pendingLeaves) {
+                            List<Attendance> todayAttendance, PreferenceStatus nextMonthPreferences, long pendingLeaves,
+                            long pendingTrades, long pendingContractApprovals) {
     }
 
     public record DaySchedule(LocalDate date, Schedule schedule, String shiftName) {
@@ -117,7 +121,10 @@ public class HomeService {
                 activeVacancies, todayShifts,
                 attendanceRepository.findByStoreIdAndWorkDateOrderByClockInAsc(storeId, date),
                 preferenceStatus(store, date, employeeCount, null),
-                leaveService.countPending(storeId));
+                leaveService.countPending(storeId),
+                tradeRepository.countByStoreIdAndStatus(storeId, TradeStatus.PEER_ACCEPTED),
+                submissionRepository.countByEmployee_StoreIdAndEmployee_StatusAndMonthGreaterThanEqualAndContractExceedApprovedFalseAndContractExceedDecidedAtIsNull(
+                        storeId, EmployeeStatus.APPROVED, YearMonth.from(date).atDay(1)));
     }
 
     public WorkerHome getWorkerHome(Long storeId, LocalDate date, String username) {

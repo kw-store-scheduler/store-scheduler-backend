@@ -94,8 +94,10 @@ class ShiftTradeTest {
         as("hajun", post("/api/stores/{s}/trades/{t}/accept", store.getId(), tradeId))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("PEER_ACCEPTED"));
         as("owner", get("/api/stores/{s}/trades", store.getId())).andExpect(jsonPath("$.length()").value(1));
+        as("owner", get("/api/stores/{s}/home/owner", store.getId())).andExpect(jsonPath("$.pendingTrades").value(1));
         as("owner", post("/api/stores/{s}/trades/{t}/approve", store.getId(), tradeId))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.status").value("APPROVED"));
+        as("owner", get("/api/stores/{s}/home/owner", store.getId())).andExpect(jsonPath("$.pendingTrades").value(0));
 
         assertThat(scheduleRepository.findById(myClose.getId()).orElseThrow().getEmployee().getId()).isEqualTo(hajun.getId());
         assertThat(scheduleRepository.findById(hajunOpen.getId()).orElseThrow().getEmployee().getId()).isEqualTo(me.getId());
