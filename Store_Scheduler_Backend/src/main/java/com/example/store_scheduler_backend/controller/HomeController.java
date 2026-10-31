@@ -53,7 +53,9 @@ public class HomeController {
                         .toList(),
                 home.todayAttendance().stream().map(AttendanceSummary::from).toList(),
                 PreferenceStatusResponse.from(home.nextMonthPreferences()),
-                home.pendingLeaves()));
+                home.pendingLeaves(),
+                home.pendingTrades(),
+                home.pendingContractApprovals()));
     }
 
     @Operation(summary = "알바 홈", description = "오늘 근무와 같이 일하는 사람, 이번 주 근무, 나에게 온 대타 요청, 이번 달 예상 급여. date를 생략하면 오늘입니다.")
@@ -110,7 +112,8 @@ public class HomeController {
     record OwnerHomeResponse(Long storeId, String storeName, LocalDate date, LocalDate weekStart, long weeklyLaborCost,
                              long employeeCount, long pendingApprovals, List<VacancyResponse> activeVacancies,
                              List<ShiftStatusResponse> todayShifts, List<AttendanceSummary> todayAttendance,
-                             PreferenceStatusResponse nextMonthPreferences, long pendingLeaves) {
+                             PreferenceStatusResponse nextMonthPreferences, long pendingLeaves,
+                             long pendingTrades, long pendingContractApprovals) {
     }
 
     // 정규직만 값이 있다

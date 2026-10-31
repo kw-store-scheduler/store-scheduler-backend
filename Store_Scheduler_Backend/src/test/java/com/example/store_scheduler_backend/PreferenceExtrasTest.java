@@ -11,6 +11,7 @@ import com.example.store_scheduler_backend.domain.Store;
 import com.example.store_scheduler_backend.domain.User;
 import com.example.store_scheduler_backend.repository.DayOffRequestRepository;
 import com.example.store_scheduler_backend.repository.EmployeeRepository;
+import com.example.store_scheduler_backend.repository.NotificationRepository;
 import com.example.store_scheduler_backend.repository.ShiftRepository;
 import com.example.store_scheduler_backend.repository.StoreRepository;
 import com.example.store_scheduler_backend.repository.UserRepository;
@@ -58,6 +59,7 @@ class PreferenceExtrasTest {
     @Autowired EmployeeRepository employeeRepository;
     @Autowired ShiftRepository shiftRepository;
     @Autowired DayOffRequestRepository dayOffRequestRepository;
+    @Autowired NotificationRepository notificationRepository;
 
     private Store store;
     private Shift open;
@@ -152,6 +154,39 @@ class PreferenceExtrasTest {
     }
 
     @Test
+    void 계약_초과는_대기와_거절을_구분하고_양쪽에_알리며_같은_시간으로_다시_내도_결정을_유지한다() throws Exception {
+        as("owner", patch("/api/stores/{s}/employees/{e}/profile", store.getId(), yuna.getId())
+                .contentType("application/json").content("{\"contractMinWeeklyHours\":15,\"contractMaxWeeklyHours\":20}"))
+                .andExpect(status().isOk());
+
+        submitMaxHours(100).andExpect(jsonPath("$.submission.contractExceedStatus").value("PENDING"));
+        as("owner", get("/api/stores/{s}/preferences", store.getId()).param("month", NOVEMBER.toString()))
+                .andExpect(jsonPath("$.employees[0].contractExceedStatus").value("PENDING"))
+                .andExpect(jsonPath("$.employees[0].requestedMaxMonthlyHours").value(100))
+                .andExpect(jsonPath("$.employees[0].contractMaxMonthlyHours").value(86));
+        as("owner", get("/api/stores/{s}/home/owner", store.getId()).param("date", "2026-11-01"))
+                .andExpect(jsonPath("$.pendingContractApprovals").value(1));
+        assertThat(notificationRepository.findByUser_UsernameAndReadAtIsNull("owner"))
+                .singleElement().satisfies(n -> assertThat(n.getTitle()).isEqualTo("계약 초과 근무 승인 필요"));
+
+        as("owner", post("/api/stores/{s}/preferences/{e}/contract-exceed", store.getId(), yuna.getId())
+                .param("month", NOVEMBER.toString()).param("approved", "false"))
+                .andExpect(status().isOk());
+        as("owner", get("/api/stores/{s}/preferences", store.getId()).param("month", NOVEMBER.toString()))
+                .andExpect(jsonPath("$.employees[0].needsContractApproval").value(false))
+                .andExpect(jsonPath("$.employees[0].contractExceedStatus").value("REJECTED"));
+        as("owner", get("/api/stores/{s}/home/owner", store.getId()).param("date", "2026-11-01"))
+                .andExpect(jsonPath("$.pendingContractApprovals").value(0));
+        assertThat(notificationRepository.findByUser_UsernameAndReadAtIsNull("yuna"))
+                .anySatisfy(n -> assertThat(n.getTitle()).isEqualTo("계약 초과 근무 거절"));
+
+        submitMaxHours(100).andExpect(jsonPath("$.submission.contractExceedStatus").value("REJECTED"));
+        submitMaxHours(90).andExpect(jsonPath("$.submission.contractExceedStatus").value("PENDING"));
+        assertThat(notificationRepository.findByUser_UsernameAndReadAtIsNull("owner")).hasSize(2);
+        submitMaxHours(80).andExpect(jsonPath("$.submission.contractExceedStatus").doesNotExist());
+    }
+
+    @Test
     void 정규직은_휴무_대안에_둔_연차와_반차만큼_최대_사용량을_계산한다() throws Exception {
         Employee jisu = new Employee("지수", null, store, userRepository.save(new User("jisu", "pw", Role.EMPLOYEE)));
         jisu.fillJoinProfile(null, LocalDate.now().minusYears(2).minusMonths(1), false, EmploymentType.FULL_TIME);
@@ -182,6 +217,13 @@ class PreferenceExtrasTest {
 
     private JsonNode body(ResultActions result) throws Exception {
         return objectMapper.readTree(result.andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+    }
+
+    private ResultActions submitMaxHours(int hours) throws Exception {
+        return as("yuna", put("/api/stores/{s}/preferences/my", store.getId())
+                .param("month", NOVEMBER.toString())
+                .contentType("application/json").content("{\"slots\":[],\"maxMonthlyHours\":" + hours + "}"))
+                .andExpect(status().isOk());
     }
 
     private ResultActions as(String username, MockHttpServletRequestBuilder request) throws Exception {

@@ -50,8 +50,10 @@ public class PreferenceSubmission {
     // 정규직: 주마다 쉬는 날을 이틀 붙여서
     private Boolean restDaysTogether;
 
-    // 이번 달 최대 시간이 계약 상한을 넘을 때 점주가 승인했는지. null이면 승인 전
+    // 이번 달 최대 시간이 계약 상한을 넘을 때만 값이 있다. false는 결정 전이거나 거절이고, decidedAt으로 구분한다
     private Boolean contractExceedApproved;
+
+    private LocalDateTime contractExceedDecidedAt;
 
     @Column(nullable = false)
     private LocalDateTime submittedAt;
@@ -94,8 +96,29 @@ public class PreferenceSubmission {
         return Boolean.TRUE.equals(restDaysTogether);
     }
 
+    public void requestContractExceed() {
+        this.contractExceedApproved = false;
+        this.contractExceedDecidedAt = null;
+    }
+
+    public void clearContractExceed() {
+        this.contractExceedApproved = null;
+        this.contractExceedDecidedAt = null;
+    }
+
     public void decideContractExceed(boolean approved) {
         this.contractExceedApproved = approved;
+        this.contractExceedDecidedAt = LocalDateTime.now();
+    }
+
+    public ContractExceedStatus getContractExceedStatus() {
+        if (contractExceedApproved == null) {
+            return null;
+        }
+        if (contractExceedApproved) {
+            return ContractExceedStatus.APPROVED;
+        }
+        return contractExceedDecidedAt == null ? ContractExceedStatus.PENDING : ContractExceedStatus.REJECTED;
     }
 
     public List<PreferencePriority> getPriorityList() {
